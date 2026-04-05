@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import {
-  Plus, X, ExternalLink, ChevronLeft, Edit2, Check,
+  Plus, X, ExternalLink, ChevronLeft, Edit2, Check, Trash2,
   Eye, Heart, Bookmark, Users, Image as ImgIcon, Clock,
 } from "lucide-react";
 import {
@@ -193,10 +193,20 @@ function AddAccountModal({ onClose, onAdd }) {
 /* ─────────────────────────────────────────────
    Account Detail Page
 ───────────────────────────────────────────── */
-function AccountDetail({ account, members, assignments, posts, onBack, onAssign }) {
+function AccountDetail({ account, members, assignments, posts, onBack, onAssign, onDelete }) {
   const isMobile = useIsMobile();
   const [showAssignMenu, setShowAssign] = useState(false);
   const [selectedPost, setSelected]    = useState(null);
+  const [deleting, setDeleting]        = useState(false);
+
+  const handleDelete = async () => {
+    if (!window.confirm(`确定要删除账号「${account.name}」吗？\n此操作不可撤销，该账号下的帖子不会被删除。`)) return;
+    setDeleting(true);
+    const { error } = await supabase.from("accounts").delete().eq("id", account.id);
+    setDeleting(false);
+    if (error) { alert("删除失败：" + error.message); return; }
+    onDelete(account.id);
+  };
   const weekly         = getWeekly(account);
   const assignedMember = members.find(m => m.id === assignments[account.id]);
   const accountPosts   = posts.filter(p => (p.account_id ?? p.accountId) === account.id);
@@ -207,13 +217,24 @@ function AccountDetail({ account, members, assignments, posts, onBack, onAssign 
 
   return (
     <div style={{ padding: isMobile ? 16 : 32, maxWidth: 900 }}>
-      <button onClick={onBack} style={{
-        display: "flex", alignItems: "center", gap: 6,
-        background: "none", border: "none", color: "#666",
-        cursor: "pointer", fontSize: 13, marginBottom: 20, padding: 0,
-      }}>
-        <ChevronLeft size={16} /> 返回账号列表
-      </button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <button onClick={onBack} style={{
+          display: "flex", alignItems: "center", gap: 6,
+          background: "none", border: "none", color: "#666",
+          cursor: "pointer", fontSize: 13, padding: 0,
+        }}>
+          <ChevronLeft size={16} /> 返回账号列表
+        </button>
+        <button onClick={handleDelete} disabled={deleting} style={{
+          display: "flex", alignItems: "center", gap: 6,
+          padding: "7px 14px", background: "transparent",
+          border: "1px solid #2a2a2a", borderRadius: 8,
+          color: deleting ? "#555" : "#FF4444", fontSize: 12,
+          cursor: deleting ? "not-allowed" : "pointer",
+        }}>
+          <Trash2 size={13} /> {deleting ? "删除中…" : "删除账号"}
+        </button>
+      </div>
 
       {/* Header card */}
       <div style={{
@@ -466,6 +487,7 @@ export default function AccountsPage({ accounts, members, onAccountsChange }) {
         posts={posts}
         onBack={() => setDetail(null)}
         onAssign={handleAssign}
+        onDelete={id => { onAccountsChange(prev => prev.filter(a => a.id !== id)); setDetail(null); }}
       />
     );
   }
