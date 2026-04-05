@@ -2,3 +2,8 @@ node_modules
 dist
 .env
 .env.local
+
+# 爬虫配置（含密钥，不提交）
+crawler/config.py
+crawler/logs/
+crawler/__pycache__/

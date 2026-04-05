@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
-import { FileText, Users2, Plus, X, UserCircle } from "lucide-react";
+import { FileText, Users2, CalendarDays, Plus, X, UserCircle } from "lucide-react";
 import { supabase } from "./supabase.js";
 import ContentManager from "./components/ContentManager.jsx";
 import AccountsPage   from "./components/AccountsPage.jsx";
+import CalendarPage   from "./components/CalendarPage.jsx";
 import { ROLE_LABELS, inputStyle, useIsMobile } from "./components/shared.jsx";
 
 const FALLBACK_ACCOUNTS = [
@@ -115,8 +116,9 @@ export default function App() {
   };
 
   const navItems = [
-    { key: "accounts", icon: <Users2 size={20} />,   label: "账号管理" },
-    { key: "content",  icon: <FileText size={20} />, label: "内容管理" },
+    { key: "accounts", icon: <Users2 size={20} />,        label: "账号管理" },
+    { key: "content",  icon: <FileText size={20} />,      label: "内容管理" },
+    { key: "calendar", icon: <CalendarDays size={20} />,  label: "内容日历" },
   ];
 
   return (
@@ -228,6 +230,7 @@ export default function App() {
       }}>
         {view === "content"  && <ContentManager accounts={accounts} members={members} />}
         {view === "accounts" && <AccountsPage   accounts={accounts} members={members} onAccountsChange={setAccounts} />}
+        {view === "calendar" && <CalendarPage   accounts={accounts} members={members} />}
       </div>
 
       {/* ── Mobile bottom tab bar ── */}

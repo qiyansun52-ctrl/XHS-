@@ -1,0 +1,61 @@
+# ================================================================
+# GitHub Actions 定时爬取任务
+# 每天北京时间 09:00 和 21:00 各跑一次
+#
+# 注意：MediaCrawler 需要登录 Cookie，GitHub Actions 无法扫码
+# 所以这里只跑"数据导入"步骤
+# 爬取本身建议在本地跑，或用有 Cookie 的服务器
+#
+# 配置 Secrets：
+#   Settings → Secrets → New repository secret
+#   SUPABASE_URL = https://xxx.supabase.co
+#   SUPABASE_KEY = eyJhbGciO...
+# ================================================================
+
+name: Daily Stats Import
+
+on:
+  schedule:
+    - cron: "0 1 * * *"   # UTC 01:00 = 北京 09:00
+    - cron: "0 13 * * *"  # UTC 13:00 = 北京 21:00
+  workflow_dispatch:       # 允许手动触发
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r crawler/requirements.txt
+
+      - name: Run import
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          cd crawler
+          # 从环境变量覆盖 config（生产环境用 secrets，不硬编码）
+          python3 -c "
+          import os, import_stats
+          # 用环境变量覆盖 config
+          import config
+          config.SUPABASE_URL = os.environ['SUPABASE_URL']
+          config.SUPABASE_KEY = os.environ['SUPABASE_KEY']
+          import_stats.main()
+          "
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawl-logs-${{ github.run_id }}
+          path: crawler/logs/
+          retention-days: 30
