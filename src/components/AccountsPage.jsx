@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import {
-  Plus, X, ExternalLink, ChevronLeft, Edit2, Check, Trash2,
+  Plus, X, ExternalLink, ChevronLeft, Edit2, Check, Trash2, Info,
   Eye, Heart, Bookmark, Users, Image as ImgIcon, Clock,
 } from "lucide-react";
 import {
@@ -193,11 +193,85 @@ function AddAccountModal({ onClose, onAdd }) {
 /* ─────────────────────────────────────────────
    Account Detail Page
 ───────────────────────────────────────────── */
+function AccountInfoModal({ account, onClose }) {
+  const isMobile = useIsMobile();
+  const rows = [
+    { label: "账号名称",   value: account.name },
+    { label: "头像字母",   value: account.avatar },
+    { label: "地区",       value: account.flag },
+    { label: "账号颜色",   value: account.color, isColor: true },
+    { label: "小红书链接", value: account.xhs_link, isLink: true },
+    { label: "账号简介",   value: account.bio },
+    { label: "粉丝数",     value: account.followers?.toLocaleString() },
+    { label: "浏览量",     value: account.views?.toLocaleString() },
+    { label: "点赞数",     value: account.likes?.toLocaleString() },
+    { label: "收藏数",     value: account.saves?.toLocaleString() },
+    { label: "创建时间",   value: account.created_at ? new Date(account.created_at).toLocaleString("zh-CN") : null },
+  ].filter(r => r.value);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+      display: "flex", alignItems: isMobile ? "flex-end" : "center",
+      justifyContent: "center", zIndex: 300,
+    }} onClick={onClose}>
+      <div style={{
+        background: "#111", border: "1px solid #2a2a2a",
+        borderRadius: isMobile ? "16px 16px 0 0" : 14,
+        padding: isMobile ? "24px 20px 32px" : "28px 28px",
+        paddingBottom: isMobile ? "calc(32px + env(safe-area-inset-bottom))" : "28px",
+        width: isMobile ? "100%" : 420,
+        maxHeight: isMobile ? "85dvh" : "80vh",
+        overflow: "auto",
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Avatar acc={account} size={36} />
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#fff" }}>{account.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 4 }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 1, borderRadius: 10, overflow: "hidden", border: "1px solid #1e1e1e" }}>
+          {rows.map(({ label, value, isColor, isLink }) => (
+            <div key={label} style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "12px 16px", background: "#0d0d0d", gap: 16,
+              borderBottom: "1px solid #1a1a1a",
+            }}>
+              <span style={{ fontSize: 12, color: "#555", flexShrink: 0 }}>{label}</span>
+              {isColor ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 14, height: 14, borderRadius: "50%", background: value }} />
+                  <span style={{ fontSize: 13, color: "#bbb", fontFamily: "monospace" }}>{value}</span>
+                </div>
+              ) : isLink ? (
+                <a href={value} target="_blank" rel="noopener noreferrer" style={{
+                  fontSize: 12, color: "#FF2442", textDecoration: "none",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220,
+                  display: "flex", alignItems: "center", gap: 4,
+                }}>
+                  <ExternalLink size={11} /> 打开链接
+                </a>
+              ) : (
+                <span style={{ fontSize: 13, color: "#ccc", textAlign: "right", maxWidth: 240, wordBreak: "break-word" }}>{value}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AccountDetail({ account, members, assignments, posts, onBack, onAssign, onDelete }) {
   const isMobile = useIsMobile();
   const [showAssignMenu, setShowAssign] = useState(false);
   const [selectedPost, setSelected]    = useState(null);
   const [deleting, setDeleting]        = useState(false);
+  const [showInfo, setShowInfo]        = useState(false);
 
   const handleDelete = async () => {
     if (!window.confirm(`确定要删除账号「${account.name}」吗？\n此操作不可撤销，该账号下的帖子不会被删除。`)) return;
@@ -225,15 +299,25 @@ function AccountDetail({ account, members, assignments, posts, onBack, onAssign,
         }}>
           <ChevronLeft size={16} /> 返回账号列表
         </button>
-        <button onClick={handleDelete} disabled={deleting} style={{
-          display: "flex", alignItems: "center", gap: 6,
-          padding: "7px 14px", background: "transparent",
-          border: "1px solid #2a2a2a", borderRadius: 8,
-          color: deleting ? "#555" : "#FF4444", fontSize: 12,
-          cursor: deleting ? "not-allowed" : "pointer",
-        }}>
-          <Trash2 size={13} /> {deleting ? "删除中…" : "删除账号"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setShowInfo(true)} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "7px 14px", background: "transparent",
+            border: "1px solid #2a2a2a", borderRadius: 8,
+            color: "#aaa", fontSize: 12, cursor: "pointer",
+          }}>
+            <Info size={13} /> 账号信息
+          </button>
+          <button onClick={handleDelete} disabled={deleting} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "7px 14px", background: "transparent",
+            border: "1px solid #2a2a2a", borderRadius: 8,
+            color: deleting ? "#555" : "#FF4444", fontSize: 12,
+            cursor: deleting ? "not-allowed" : "pointer",
+          }}>
+            <Trash2 size={13} /> {deleting ? "删除中…" : "删除账号"}
+          </button>
+        </div>
       </div>
 
       {/* Header card */}
@@ -414,6 +498,8 @@ function AccountDetail({ account, members, assignments, posts, onBack, onAssign,
           onStatusChange={handleStatusChange}
         />
       )}
+
+      {showInfo && <AccountInfoModal account={account} onClose={() => setShowInfo(false)} />}
     </div>
   );
 }
