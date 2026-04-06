@@ -17,12 +17,22 @@ import PostDetailDrawer from "./PostDetailDrawer.jsx";
 /* ─────────────────────────────────────────────
    Add Account Modal
 ───────────────────────────────────────────── */
-function AddAccountModal({ onClose, onAdd }) {
+function AddAccountModal({ onClose, onAdd, onUpdate, account }) {
+  const isEdit = !!account;
   const isMobile = useIsMobile();
   const [form, setForm] = useState({
-    name: "", avatar: "", flag: "🌏", color: "#FF2442",
-    xhs_link: "", phone: "", xhs_password: "",
-    followers: "", views: "", likes: "", saves: "", bio: "",
+    name:         account?.name         || "",
+    avatar:       account?.avatar       || "",
+    flag:         account?.flag         || "🌏",
+    color:        account?.color        || "#FF2442",
+    xhs_link:     account?.xhs_link     || "",
+    phone:        account?.phone        || "",
+    xhs_password: account?.xhs_password || "",
+    followers:    account?.followers    ?? "",
+    views:        account?.views        ?? "",
+    likes:        account?.likes        ?? "",
+    saves:        account?.saves        ?? "",
+    bio:          account?.bio          || "",
   });
   const [saving, setSaving] = useState(false);
 
@@ -45,10 +55,17 @@ function AddAccountModal({ onClose, onAdd }) {
       likes:        Number(form.likes)     || 0,
       saves:        Number(form.saves)     || 0,
     };
-    const { data, error } = await supabase.from("accounts").insert([payload]).select().single();
-    setSaving(false);
-    if (error) { alert("创建失败：" + error.message); return; }
-    onAdd(data);
+    if (isEdit) {
+      const { data, error } = await supabase.from("accounts").update(payload).eq("id", account.id).select().single();
+      setSaving(false);
+      if (error) { alert("保存失败：" + error.message); return; }
+      onUpdate(data);
+    } else {
+      const { data, error } = await supabase.from("accounts").insert([payload]).select().single();
+      setSaving(false);
+      if (error) { alert("创建失败：" + error.message); return; }
+      onAdd(data);
+    }
     onClose();
   };
 
@@ -69,7 +86,7 @@ function AddAccountModal({ onClose, onAdd }) {
         overflow: "auto",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: "#fff", margin: 0 }}>添加账号</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 600, color: "#fff", margin: 0 }}>{isEdit ? "编辑账号" : "添加账号"}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 4 }}>
             <X size={18} />
           </button>
@@ -183,7 +200,7 @@ function AddAccountModal({ onClose, onAdd }) {
           fontSize: 14, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer",
           background: saving ? "#555" : "#FF2442", color: "#fff",
         }}>
-          {saving ? "添加中…" : "添加账号"}
+          {saving ? (isEdit ? "保存中…" : "添加中…") : (isEdit ? "保存修改" : "添加账号")}
         </button>
       </div>
     </div>
@@ -266,12 +283,13 @@ function AccountInfoModal({ account, onClose }) {
   );
 }
 
-function AccountDetail({ account, members, assignments, posts, onBack, onAssign, onDelete }) {
+function AccountDetail({ account, members, assignments, posts, onBack, onAssign, onDelete, onUpdate }) {
   const isMobile = useIsMobile();
   const [showAssignMenu, setShowAssign] = useState(false);
   const [selectedPost, setSelected]    = useState(null);
   const [deleting, setDeleting]        = useState(false);
   const [showInfo, setShowInfo]        = useState(false);
+  const [showEdit, setShowEdit]        = useState(false);
 
   const handleDelete = async () => {
     if (!window.confirm(`确定要删除账号「${account.name}」吗？\n此操作不可撤销，该账号下的帖子不会被删除。`)) return;
@@ -307,6 +325,14 @@ function AccountDetail({ account, members, assignments, posts, onBack, onAssign,
             color: "#aaa", fontSize: 12, cursor: "pointer",
           }}>
             <Info size={13} /> 账号信息
+          </button>
+          <button onClick={() => setShowEdit(true)} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "7px 14px", background: "transparent",
+            border: "1px solid #2a2a2a", borderRadius: 8,
+            color: "#aaa", fontSize: 12, cursor: "pointer",
+          }}>
+            <Edit2 size={13} /> 编辑信息
           </button>
           <button onClick={handleDelete} disabled={deleting} style={{
             display: "flex", alignItems: "center", gap: 6,
@@ -500,6 +526,13 @@ function AccountDetail({ account, members, assignments, posts, onBack, onAssign,
       )}
 
       {showInfo && <AccountInfoModal account={account} onClose={() => setShowInfo(false)} />}
+      {showEdit && (
+        <AddAccountModal
+          account={account}
+          onClose={() => setShowEdit(false)}
+          onUpdate={updated => { onUpdate(updated); setShowEdit(false); }}
+        />
+      )}
     </div>
   );
 }
@@ -574,6 +607,7 @@ export default function AccountsPage({ accounts, members, onAccountsChange }) {
         onBack={() => setDetail(null)}
         onAssign={handleAssign}
         onDelete={id => { onAccountsChange(prev => prev.filter(a => a.id !== id)); setDetail(null); }}
+        onUpdate={updated => { onAccountsChange(prev => prev.map(a => a.id === updated.id ? updated : a)); setDetail(updated); }}
       />
     );
   }
