@@ -6,14 +6,6 @@ import AccountsPage   from "./components/AccountsPage.jsx";
 import CalendarPage   from "./components/CalendarPage.jsx";
 import { ROLE_LABELS, inputStyle, useIsMobile } from "./components/shared.jsx";
 
-const FALLBACK_ACCOUNTS = [
-  { id: 1, name: "Emily_英国读研",  avatar: "E", flag: "🇬🇧", color: "#FF2442", followers: 12400, views: 234000, likes: 18900, saves: 8900 },
-  { id: 2, name: "Sophia_伦敦日记", avatar: "S", flag: "🇬🇧", color: "#FF7A7A", followers:  8200, views: 156000, likes: 12300, saves: 5600 },
-  { id: 3, name: "Chloe_澳洲留学", avatar: "C", flag: "🇦🇺", color: "#FF9F43", followers: 15600, views: 312000, likes: 24500, saves: 11200 },
-  { id: 4, name: "Amy_加拿大UBC",  avatar: "A", flag: "🇨🇦", color: "#54A0FF", followers:  6800, views:  98000, likes:  7600, saves:  3400 },
-  { id: 5, name: "Grace_美国读研", avatar: "G", flag: "🇺🇸", color: "#A29BFE", followers: 19200, views: 445000, likes: 35800, saves: 16700 },
-  { id: 6, name: "Anna_申请顾问",  avatar: "A", flag: "🌏",  color: "#00CFCF", followers:  9400, views: 178000, likes: 14200, saves:  7800 },
-];
 
 function JoinTeamModal({ onClose, onJoin }) {
   const isMobile = useIsMobile();
@@ -92,7 +84,7 @@ function JoinTeamModal({ onClose, onJoin }) {
 export default function App() {
   const isMobile = useIsMobile();
   const [view, setView]         = useState("accounts");
-  const [accounts, setAccounts] = useState(FALLBACK_ACCOUNTS);
+  const [accounts, setAccounts] = useState([]);
   const [members, setMembers]   = useState([]);
   const [showJoin, setShowJoin] = useState(false);
 
@@ -107,7 +99,7 @@ export default function App() {
 
   const loadAccounts = async () => {
     const { data, error } = await supabase.from("accounts").select("*").order("id");
-    if (!error && data?.length > 0) setAccounts(data);
+    if (!error && data) setAccounts(data);
   };
 
   const loadMembers = async () => {
