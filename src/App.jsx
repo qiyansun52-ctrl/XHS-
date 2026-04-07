@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { FileText, Users2, CalendarDays, Plus, X, UserCircle } from "lucide-react";
+import { FileText, Users2, CalendarDays, BookOpen, Plus, X, UserCircle } from "lucide-react";
 import { supabase } from "./supabase.js";
 import ContentManager from "./components/ContentManager.jsx";
 import AccountsPage   from "./components/AccountsPage.jsx";
 import CalendarPage   from "./components/CalendarPage.jsx";
+import MaterialPage   from "./components/MaterialPage.jsx";
 import { ROLE_LABELS, inputStyle, useIsMobile } from "./components/shared.jsx";
 
 
@@ -111,6 +112,7 @@ export default function App() {
     { key: "accounts", icon: <Users2 size={20} />,        label: "账号管理" },
     { key: "content",  icon: <FileText size={20} />,      label: "内容管理" },
     { key: "calendar", icon: <CalendarDays size={20} />,  label: "内容日历" },
+    { key: "material", icon: <BookOpen size={20} />,      label: "素材库"   },
   ];
 
   return (
@@ -223,6 +225,7 @@ export default function App() {
         {view === "content"  && <ContentManager accounts={accounts} members={members} />}
         {view === "accounts" && <AccountsPage   accounts={accounts} members={members} onAccountsChange={setAccounts} />}
         {view === "calendar" && <CalendarPage   accounts={accounts} members={members} />}
+        {view === "material" && <MaterialPage />}
       </div>
 
       {/* ── Mobile bottom tab bar ── */}
