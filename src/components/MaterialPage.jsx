@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, X, Trash2 } from "lucide-react";
+import { Plus, X, Trash2, ExternalLink } from "lucide-react";
 import { supabase } from "../supabase.js";
 import { inputStyle, useIsMobile } from "./shared.jsx";
 
@@ -193,7 +193,7 @@ function TopicsTab() {
   const [loading, setLoading]   = useState(true);
   const [filter, setFilter]     = useState("全部");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm]         = useState({ description: "", tag: TOPIC_TAGS[0] });
+  const [form, setForm]         = useState({ description: "", tag: TOPIC_TAGS[0], reference_url: "" });
   const [saving, setSaving]     = useState(false);
 
   useEffect(() => { load(); }, []);
@@ -208,12 +208,14 @@ function TopicsTab() {
     if (!form.description.trim()) { alert("请填写选题描述"); return; }
     setSaving(true);
     const { data, error } = await supabase.from("topics").insert([{
-      description: form.description.trim(), tag: form.tag,
+      description: form.description.trim(),
+      tag: form.tag,
+      reference_url: form.reference_url.trim() || null,
     }]).select().single();
     setSaving(false);
     if (error) { alert("添加失败：" + error.message); return; }
     setItems(p => [data, ...p]);
-    setForm({ description: "", tag: TOPIC_TAGS[0] });
+    setForm({ description: "", tag: TOPIC_TAGS[0], reference_url: "" });
     setShowForm(false);
   };
 
@@ -264,6 +266,11 @@ function TopicsTab() {
             <textarea rows={2} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               placeholder="描述这个选题方向的核心内容…" style={{ ...inputStyle, resize: "vertical" }} />
           </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>参考链接（可选）</label>
+            <input value={form.reference_url} onChange={e => setForm(p => ({ ...p, reference_url: e.target.value }))}
+              placeholder="https://www.xiaohongshu.com/explore/…" style={inputStyle} />
+          </div>
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 7 }}>类型标签</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -312,7 +319,18 @@ function TopicsTab() {
                     <Trash2 size={14} />
                   </button>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+                {item.reference_url && (
+                  <a href={item.reference_url} target="_blank" rel="noopener noreferrer" style={{
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                    fontSize: 11, color: "#FF2442", textDecoration: "none", marginTop: 8,
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = "0.75"}
+                    onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                  >
+                    <ExternalLink size={10} /> 查看参考帖子
+                  </a>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
                   <span style={{
                     fontSize: 11, padding: "2px 10px", borderRadius: 20,
                     background: `${color}18`, color: color, border: `1px solid ${color}44`,
@@ -501,9 +519,181 @@ function BannedWordsTab() {
 }
 
 /* ─────────────────────────────────
+   Tab 5: 爆款收藏
+───────────────────────────────── */
+const COUNTRIES = ["英国", "美国", "澳洲", "加拿大", "新加坡", "香港"];
+const COUNTRY_COLOR = {
+  "英国": "#FF7A7A", "美国": "#A29BFE", "澳洲": "#FF9F43",
+  "加拿大": "#54A0FF", "新加坡": "#26DE81", "香港": "#FF2442",
+};
+
+function ViralPostsTab() {
+  const isMobile = useIsMobile();
+  const [items, setItems]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [filter, setFilter]     = useState("全部");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm]         = useState({ url: "", note: "", country: COUNTRIES[0] });
+  const [saving, setSaving]     = useState(false);
+
+  useEffect(() => { load(); }, []);
+
+  const load = async () => {
+    const { data } = await supabase.from("viral_posts").select("*").order("created_at", { ascending: false });
+    if (data) setItems(data);
+    setLoading(false);
+  };
+
+  const handleAdd = async () => {
+    if (!form.url.trim()) { alert("请填写帖子链接"); return; }
+    setSaving(true);
+    const { data, error } = await supabase.from("viral_posts").insert([{
+      url: form.url.trim(),
+      note: form.note.trim() || null,
+      country: form.country,
+    }]).select().single();
+    setSaving(false);
+    if (error) { alert("添加失败：" + error.message); return; }
+    setItems(p => [data, ...p]);
+    setForm({ url: "", note: "", country: COUNTRIES[0] });
+    setShowForm(false);
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("确定删除？")) return;
+    const { error } = await supabase.from("viral_posts").delete().eq("id", id);
+    if (error) { alert("删除失败：" + error.message); return; }
+    setItems(p => p.filter(i => i.id !== id));
+  };
+
+  const filtered = filter === "全部" ? items : items.filter(i => i.country === filter);
+
+  if (loading) return <div style={{ color: "#444", padding: 24 }}>加载中…</div>;
+
+  return (
+    <div>
+      {/* Filter + Add */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {["全部", ...COUNTRIES].map(c => {
+            const color = COUNTRY_COLOR[c];
+            const active = filter === c;
+            return (
+              <button key={c} onClick={() => setFilter(c)} style={{
+                padding: "5px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+                border: `1px solid ${active ? (color || "#FF2442") : "#2a2a2a"}`,
+                background: active ? (color ? `${color}22` : "rgba(255,36,66,0.1)") : "transparent",
+                color: active ? (color || "#FF2442") : "#555",
+                fontWeight: active ? 600 : 400,
+              }}>{c}</button>
+            );
+          })}
+        </div>
+        <button onClick={() => setShowForm(p => !p)} style={{
+          display: "flex", alignItems: "center", gap: 7, flexShrink: 0,
+          padding: "8px 16px", background: showForm ? "#333" : "#FF2442",
+          color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer",
+        }}>
+          <Plus size={14} /> 添加收藏
+        </button>
+      </div>
+
+      {/* Add form */}
+      {showForm && (
+        <div style={{ background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: 16, marginBottom: 16 }}>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>帖子链接 *</label>
+            <input value={form.url} onChange={e => setForm(p => ({ ...p, url: e.target.value }))}
+              placeholder="https://www.xiaohongshu.com/explore/…" style={inputStyle} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>备注说明</label>
+            <input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))}
+              placeholder="为什么觉得这条不错？" style={inputStyle} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 7 }}>目的地标签</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {COUNTRIES.map(c => {
+                const color = COUNTRY_COLOR[c];
+                const active = form.country === c;
+                return (
+                  <button key={c} onClick={() => setForm(p => ({ ...p, country: c }))} style={{
+                    padding: "5px 12px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+                    border: `1px solid ${active ? color : "#2a2a2a"}`,
+                    background: active ? `${color}22` : "transparent",
+                    color: active ? color : "#555",
+                  }}>{c}</button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setShowForm(false)} style={{
+              padding: "8px 16px", background: "transparent", border: "1px solid #2a2a2a",
+              borderRadius: 7, color: "#666", fontSize: 13, cursor: "pointer",
+            }}>取消</button>
+            <button onClick={handleAdd} disabled={saving} style={{
+              padding: "8px 16px", background: saving ? "#555" : "#FF2442",
+              border: "none", borderRadius: 7, color: "#fff", fontSize: 13, fontWeight: 600,
+              cursor: saving ? "not-allowed" : "pointer",
+            }}>{saving ? "保存中…" : "保存"}</button>
+          </div>
+        </div>
+      )}
+
+      {filtered.length === 0 ? <Empty text="暂无收藏帖子" /> : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 10 }}>
+          {filtered.map(item => {
+            const color = COUNTRY_COLOR[item.country] || "#555";
+            return (
+              <div key={item.id} style={{
+                background: "#111", border: "1px solid #1e1e1e", borderRadius: 10,
+                padding: "14px 16px", borderLeft: `3px solid ${color}`,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 10 }}>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer" style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    fontSize: 13, color: "#FF2442", textDecoration: "none",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = "0.75"}
+                    onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                  >
+                    <ExternalLink size={12} style={{ flexShrink: 0 }} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.url}</span>
+                  </a>
+                  <button onClick={() => handleDelete(item.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 2, flexShrink: 0 }}
+                    onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
+                    onMouseLeave={e => e.currentTarget.style.color = "#333"}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                {item.note && (
+                  <p style={{ fontSize: 12, color: "#888", margin: "0 0 10px", lineHeight: 1.55 }}>{item.note}</p>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{
+                    fontSize: 11, padding: "2px 10px", borderRadius: 20,
+                    background: `${color}18`, color: color, border: `1px solid ${color}44`,
+                  }}>{item.country}</span>
+                  <span style={{ fontSize: 11, color: "#333" }}>
+                    {new Date(item.created_at).toLocaleDateString("zh-CN")}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────
    主组件
 ───────────────────────────────── */
-const TABS = ["对标账号库", "选题库", "标题库", "违禁词记录"];
+const TABS = ["对标账号库", "选题库", "标题库", "违禁词记录", "爆款收藏"];
 
 export default function MaterialPage() {
   const isMobile = useIsMobile();
@@ -514,7 +704,7 @@ export default function MaterialPage() {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: "#fff", margin: 0 }}>素材库</h1>
-        <p style={{ color: "#555", fontSize: 13, margin: "5px 0 0" }}>对标账号、选题方向、标题灵感、违禁词管理</p>
+        <p style={{ color: "#555", fontSize: 13, margin: "5px 0 0" }}>对标账号、选题方向、标题灵感、违禁词、爆款收藏</p>
       </div>
 
       {/* Tab bar */}
@@ -543,6 +733,7 @@ export default function MaterialPage() {
       {tab === 1 && <TopicsTab />}
       {tab === 2 && <TitlesTab />}
       {tab === 3 && <BannedWordsTab />}
+      {tab === 4 && <ViralPostsTab />}
     </div>
   );
 }
