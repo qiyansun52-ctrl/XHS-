@@ -2,8 +2,6 @@
 
 An internal operations platform for a Xiaohongshu (Little Red Book) content team managing multiple overseas Chinese student accounts. Built to replace spreadsheets and manual tracking with a unified, real-time tool.
 
-**Live demo:** [xhs-tau.vercel.app](https://xhs-tau.vercel.app)
-
 ---
 
 ## Overview
