@@ -18,6 +18,8 @@ import os
 import sys
 import logging
 import re
+import uuid
+import httpx
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
@@ -85,6 +87,38 @@ def parse_count(value) -> int:
     except (ValueError, TypeError):
         nums = re.findall(r"\d+\.?\d*", s)
         return int(float(nums[0])) if nums else 0
+
+
+async def upload_cover_image(xhs_cdn_url: str, folder: str = "covers") -> str:
+    """下载 XHS CDN 图片并上传到 Supabase Storage，返回公开 URL"""
+    if not xhs_cdn_url:
+        return ""
+    try:
+        # 强制 https
+        dl_url = xhs_cdn_url.replace("http://", "https://")
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(dl_url, headers={
+                "Referer": "https://www.xiaohongshu.com/",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            })
+            if resp.status_code != 200:
+                return ""
+            img_bytes = resp.content
+            content_type = resp.headers.get("content-type", "image/webp")
+
+        ext = "jpg" if "jpeg" in content_type or "jpg" in content_type else "webp"
+        filename = f"{folder}/{uuid.uuid4().hex}.{ext}"
+
+        sb.storage.from_("post-images").upload(
+            path=filename,
+            file=img_bytes,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        public_url = sb.storage.from_("post-images").get_public_url(filename)
+        return public_url
+    except Exception as e:
+        log.warning(f"封面图上传失败: {e}")
+        return ""
 
 
 async def resolve_url(url: str) -> str:
@@ -198,7 +232,8 @@ async def fetch_post_data(url: str) -> Dict[str, Any]:
 
     interact = note_data.get("interact_info", {})
     images = note_data.get("image_list", [])
-    cover = images[0].get("url_default", "") if images else ""
+    raw_cover = images[0].get("url_default", "") if images else ""
+    cover = await upload_cover_image(raw_cover) if raw_cover else ""
 
     return {
         "xhs_note_id":  note_id,
@@ -253,10 +288,12 @@ async def fetch_account_data(url: str) -> Dict[str, Any]:
 
         for note in note_summaries[:10]:
             cover_info = note.get("cover", {}) or {}
+            raw_cover = cover_info.get("url_default", cover_info.get("url", ""))
+            cover = await upload_cover_image(raw_cover, folder="benchmark-covers") if raw_cover else ""
             recent_posts.append({
                 "note_id":     note.get("note_id", ""),
                 "title":       note.get("display_title", note.get("title", "")),
-                "cover_image": cover_info.get("url_default", cover_info.get("url", "")),
+                "cover_image": cover,
                 "likes":       parse_count(note.get("interact_info", {}).get("liked_count")),
                 "saves":       parse_count(note.get("interact_info", {}).get("collected_count")),
                 "xsec_token":  note.get("xsec_token", ""),
