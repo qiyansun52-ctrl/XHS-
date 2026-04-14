@@ -231,14 +231,29 @@ async def fetch_post_data(url: str) -> Dict[str, Any]:
         raise ValueError(f"帖子数据为空（可能触发风控）: {note_id}")
 
     interact = note_data.get("interact_info", {})
-    images = note_data.get("image_list", [])
-    raw_cover = images[0].get("url_default", "") if images else ""
-    cover = await upload_cover_image(raw_cover) if raw_cover else ""
+    image_list = note_data.get("image_list", [])
+
+    # 上传所有图片到 Supabase Storage
+    uploaded_images = []
+    for img in image_list:
+        raw_url = img.get("url_default", "") or img.get("url", "")
+        if raw_url:
+            public_url = await upload_cover_image(raw_url, folder="covers")
+            if public_url:
+                uploaded_images.append(public_url)
+
+    cover = uploaded_images[0] if uploaded_images else ""
+
+    # 解析 tags
+    tags = [t.get("name", "") for t in note_data.get("tag_list", []) if t.get("name")]
 
     return {
         "xhs_note_id":  note_id,
         "title":        note_data.get("title", "").strip(),
+        "caption":      note_data.get("desc", "").strip(),
         "cover_image":  cover,
+        "images":       uploaded_images,
+        "tags":         tags,
         "likes":        parse_count(interact.get("liked_count")),
         "saves":        parse_count(interact.get("collected_count")),
         "comments":     parse_count(interact.get("comment_count")),

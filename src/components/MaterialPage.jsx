@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Plus, X, Trash2, ExternalLink, RefreshCw, Heart, Bookmark, MessageCircle, Eye } from "lucide-react";
 import { supabase } from "../supabase.js";
 import { inputStyle, useIsMobile } from "./shared.jsx";
+import ViralPostDrawer from "./ViralPostDrawer.jsx";
 
 const TOPIC_TAGS = ["申请时间线", "选校避坑", "语言备考", "offer晒单", "被拒复盘", "申请焦虑", "海外日常"];
 const TAG_COLOR = {
@@ -681,6 +682,7 @@ function ViralPostsTab() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm]         = useState({ url: "", note: "", country: COUNTRIES[0] });
   const [saving, setSaving]     = useState(false);
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     load();
@@ -806,6 +808,8 @@ function ViralPostsTab() {
       )}
 
       {/* 帖子卡片网格 */}
+      {selected && <ViralPostDrawer post={selected} onClose={() => setSelected(null)} />}
+
       {filtered.length === 0 ? <Empty text="暂无收藏帖子" /> : (
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 12 }}>
           {filtered.map(item => {
@@ -816,8 +820,9 @@ function ViralPostsTab() {
 
             return (
               <div key={item.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, overflow: "hidden" }}>
-                {/* 封面图 */}
-                <div style={{ aspectRatio: "3/4", position: "relative", background: "#1a1a1a" }}>
+                {/* 封面图 — 点击打开详情 */}
+                <div onClick={() => item.fetch_status === "done" && setSelected(item)}
+                  style={{ aspectRatio: "3/4", position: "relative", background: "#1a1a1a", cursor: item.fetch_status === "done" ? "pointer" : "default" }}>
                   {item.cover_image ? (
                     <img src={item.cover_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : isLoading ? (
