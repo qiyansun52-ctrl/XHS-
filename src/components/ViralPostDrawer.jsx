@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, ChevronLeft, ChevronRight, Heart, Bookmark, MessageCircle, Eye, ExternalLink } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Heart, Bookmark, MessageCircle, Eye, ExternalLink, Download } from "lucide-react";
 import { useIsMobile } from "./shared.jsx";
 
 function fmt(n) {
@@ -187,21 +187,63 @@ export default function ViralPostDrawer({ post, onClose }) {
               </div>
             )}
 
-            {/* 跳转原帖 */}
-            <a
-              href={post.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                width: "100%", padding: "11px 0",
-                background: "#FF2442", border: "none", borderRadius: 10,
-                color: "#fff", fontSize: 13, fontWeight: 600,
-                textDecoration: "none", cursor: "pointer",
-              }}
-            >
-              <ExternalLink size={14} /> 打开原帖
-            </a>
+            {/* 操作按钮行 */}
+            <div style={{ display: "flex", gap: 10 }}>
+              {/* 打开原帖 */}
+              <a
+                href={post.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  padding: "11px 0", background: "#FF2442", borderRadius: 10,
+                  color: "#fff", fontSize: 13, fontWeight: 600, textDecoration: "none",
+                }}
+              >
+                <ExternalLink size={14} /> 打开原帖
+              </a>
+
+              {/* 下载当前图片 */}
+              {images.length > 0 && (
+                <a
+                  href={images[imgIdx]}
+                  download={`xhs-${post.xhs_note_id || "post"}-${imgIdx + 1}.webp`}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    padding: "11px 16px", background: "#1a1a1a",
+                    border: "1px solid #2a2a2a", borderRadius: 10,
+                    color: "#aaa", fontSize: 13, fontWeight: 600, textDecoration: "none",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <Download size={14} />
+                  {images.length > 1 ? `下载 ${imgIdx + 1}/${images.length}` : "下载图片"}
+                </a>
+              )}
+            </div>
+
+            {/* 批量下载全部图片（多图时显示）*/}
+            {images.length > 1 && (
+              <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {images.map((url, i) => (
+                  <a
+                    key={i}
+                    href={url}
+                    download={`xhs-${post.xhs_note_id || "post"}-${i + 1}.webp`}
+                    style={{
+                      fontSize: 11, color: "#555", background: "#161616",
+                      border: "1px solid #222", borderRadius: 6,
+                      padding: "4px 10px", textDecoration: "none",
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.color = "#aaa"}
+                    onMouseLeave={e => e.currentTarget.style.color = "#555"}
+                  >
+                    <Download size={10} /> 图{i + 1}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
