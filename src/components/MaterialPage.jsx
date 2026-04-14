@@ -241,6 +241,14 @@ function BenchmarkTab() {
                         重试抓取
                       </button>
                     )}
+                    {row.fetch_status === "done" && (
+                      <button onClick={() => handleRetry(row)} style={{ marginTop: 6, fontSize: 11, color: "#555", background: "none", border: "1px solid #2a2a2a", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#aaa"}
+                        onMouseLeave={e => e.currentTarget.style.color = "#555"}
+                      >
+                        刷新数据
+                      </button>
+                    )}
                   </div>
 
                   {/* 操作 */}
@@ -267,7 +275,7 @@ function BenchmarkTab() {
                         <div
                           key={i}
                           onClick={() => setSelectedPost({
-                            images: p.cover_image ? [p.cover_image] : [],
+                            images: Array.isArray(p.images) && p.images.length > 0 ? p.images : (p.cover_image ? [p.cover_image] : []),
                             cover_image: p.cover_image,
                             title: p.title,
                             likes: p.likes,

@@ -302,16 +302,66 @@ async def fetch_account_data(url: str) -> Dict[str, Any]:
         mc_config.CRAWLER_MAX_NOTES_COUNT = original_max
 
         for note in note_summaries[:10]:
+            note_id    = note.get("note_id", "")
+            xsec_tok   = note.get("xsec_token", "")
+            summary_title = note.get("display_title", note.get("title", ""))
             cover_info = note.get("cover", {}) or {}
-            raw_cover = cover_info.get("url_default", cover_info.get("url", ""))
-            cover = await upload_cover_image(raw_cover, folder="benchmark-covers") if raw_cover else ""
+            raw_cover  = cover_info.get("url_default", cover_info.get("url", ""))
+
+            # 尝试获取完整帖子详情（caption / tags / 全部图片）
+            full_caption = ""
+            full_tags: List[str] = []
+            uploaded_images: List[str] = []
+            full_title = summary_title
+            full_likes = parse_count(note.get("interact_info", {}).get("liked_count"))
+            full_saves = parse_count(note.get("interact_info", {}).get("collected_count"))
+            full_comments = 0
+            full_views = 0
+
+            try:
+                detail = await xhs_client.get_note_by_id(
+                    note_id=note_id,
+                    xsec_source="pc_user",
+                    xsec_token=xsec_tok,
+                )
+                if detail:
+                    interact = detail.get("interact_info", {})
+                    full_likes    = parse_count(interact.get("liked_count")) or full_likes
+                    full_saves    = parse_count(interact.get("collected_count")) or full_saves
+                    full_comments = parse_count(interact.get("comment_count"))
+                    full_views    = parse_count(interact.get("view_count"))
+                    full_title    = detail.get("title", "").strip() or summary_title
+                    full_caption  = detail.get("desc", "").strip()
+                    full_tags     = [t.get("name", "") for t in detail.get("tag_list", []) if t.get("name")]
+                    for img in detail.get("image_list", []):
+                        raw_url = img.get("url_default", "") or img.get("url", "")
+                        if raw_url:
+                            pub = await upload_cover_image(raw_url, folder="benchmark-covers")
+                            if pub:
+                                uploaded_images.append(pub)
+                    await asyncio.sleep(1)
+            except Exception as e:
+                log.warning(f"  获取帖子详情失败 ({note_id}): {e}")
+
+            # 封面：优先用上传后的第一张，否则从 summary 的 cover 字段上传
+            if not uploaded_images and raw_cover:
+                cover = await upload_cover_image(raw_cover, folder="benchmark-covers")
+                if cover:
+                    uploaded_images.append(cover)
+            cover_url = uploaded_images[0] if uploaded_images else ""
+
             recent_posts.append({
-                "note_id":     note.get("note_id", ""),
-                "title":       note.get("display_title", note.get("title", "")),
-                "cover_image": cover,
-                "likes":       parse_count(note.get("interact_info", {}).get("liked_count")),
-                "saves":       parse_count(note.get("interact_info", {}).get("collected_count")),
-                "xsec_token":  note.get("xsec_token", ""),
+                "note_id":     note_id,
+                "title":       full_title,
+                "cover_image": cover_url,
+                "images":      uploaded_images,
+                "caption":     full_caption,
+                "tags":        full_tags,
+                "likes":       full_likes,
+                "saves":       full_saves,
+                "comments":    full_comments,
+                "views":       full_views,
+                "xsec_token":  xsec_tok,
             })
     except Exception as e:
         log.warning(f"获取最近帖子失败: {e}")
