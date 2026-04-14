@@ -131,7 +131,11 @@ async def init_xhs_client() -> bool:
             await browser_ctx.add_init_script(path=stealth_js)
 
         ctx_page = await browser_ctx.new_page()
-        await ctx_page.goto("https://www.xiaohongshu.com", timeout=30000)
+        try:
+            await ctx_page.goto("https://www.xiaohongshu.com", timeout=60000, wait_until="domcontentloaded")
+        except Exception:
+            # 页面加载超时不影响 Cookie 的使用，继续初始化
+            pass
 
         cookie_str, cookie_dict = utils.convert_cookies(await browser_ctx.cookies())
         xhs_client = XiaoHongShuClient(
