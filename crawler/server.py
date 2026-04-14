@@ -480,6 +480,43 @@ async def process_topics(pending_only: bool = True):
 
 # ── 定时全量同步 ──────────────────────────────────────────────────────
 
+async def snapshot_account_stats():
+    """将 accounts 表当前数据快照写入 account_stats_history（每天一条，upsert）"""
+    try:
+        from datetime import date
+        today = date.today().isoformat()
+        result = sb.table("accounts").select("id, followers, likes, views, saves").execute()
+        for row in result.data:
+            sb.table("account_stats_history").upsert({
+                "account_id": row["id"],
+                "date":       today,
+                "followers":  row.get("followers") or 0,
+                "likes":      row.get("likes")     or 0,
+                "views":      row.get("views")     or 0,
+                "saves":      row.get("saves")     or 0,
+            }, on_conflict="account_id,date").execute()
+        log.info(f"  ✅ 自有账号快照写入 {len(result.data)} 条")
+    except Exception as e:
+        log.error(f"snapshot_account_stats 出错: {e}")
+
+
+async def snapshot_benchmark_stats():
+    """将 benchmark_accounts 当前粉丝数快照写入 benchmark_stats_history"""
+    try:
+        from datetime import date
+        today = date.today().isoformat()
+        result = sb.table("benchmark_accounts").select("id, followers").eq("fetch_status", "done").execute()
+        for row in result.data:
+            sb.table("benchmark_stats_history").upsert({
+                "benchmark_id": row["id"],
+                "date":         today,
+                "followers":    row.get("followers") or 0,
+            }, on_conflict="benchmark_id,date").execute()
+        log.info(f"  ✅ 对标账号快照写入 {len(result.data)} 条")
+    except Exception as e:
+        log.error(f"snapshot_benchmark_stats 出错: {e}")
+
+
 async def full_sync():
     """每12小时全量刷新所有已抓取记录"""
     if not client_ready:
@@ -491,6 +528,9 @@ async def full_sync():
     await process_viral_posts(pending_only=False)
     await process_benchmark_accounts(pending_only=False)
     await process_topics(pending_only=False)
+    # 同步完成后写每日快照
+    await snapshot_account_stats()
+    await snapshot_benchmark_stats()
     log.info("✅ 全量同步完成")
 
 

@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { FileText, Users2, CalendarDays, BookOpen, Plus, X, UserCircle } from "lucide-react";
+import { FileText, Users2, CalendarDays, BookOpen, BarChart2, Plus, X, UserCircle } from "lucide-react";
 import { supabase } from "./supabase.js";
-import ContentManager from "./components/ContentManager.jsx";
-import AccountsPage   from "./components/AccountsPage.jsx";
-import CalendarPage   from "./components/CalendarPage.jsx";
-import MaterialPage   from "./components/MaterialPage.jsx";
+import ContentManager  from "./components/ContentManager.jsx";
+import AccountsPage    from "./components/AccountsPage.jsx";
+import CalendarPage    from "./components/CalendarPage.jsx";
+import MaterialPage    from "./components/MaterialPage.jsx";
+import AnalyticsPage   from "./components/AnalyticsPage.jsx";
 import { ROLE_LABELS, inputStyle, useIsMobile } from "./components/shared.jsx";
 
 
@@ -109,10 +110,11 @@ export default function App() {
   };
 
   const navItems = [
-    { key: "accounts", icon: <Users2 size={20} />,        label: "账号管理" },
-    { key: "content",  icon: <FileText size={20} />,      label: "内容管理" },
-    { key: "calendar", icon: <CalendarDays size={20} />,  label: "内容日历" },
-    { key: "material", icon: <BookOpen size={20} />,      label: "素材库"   },
+    { key: "accounts",  icon: <Users2 size={20} />,       label: "账号管理" },
+    { key: "content",   icon: <FileText size={20} />,     label: "内容管理" },
+    { key: "calendar",  icon: <CalendarDays size={20} />, label: "内容日历" },
+    { key: "material",  icon: <BookOpen size={20} />,     label: "素材库"   },
+    { key: "analytics", icon: <BarChart2 size={20} />,    label: "数据监控" },
   ];
 
   return (
@@ -222,10 +224,11 @@ export default function App() {
         flex: 1, overflow: "auto",
         paddingBottom: isMobile ? "calc(60px + env(safe-area-inset-bottom))" : 0,
       }}>
-        {view === "content"  && <ContentManager accounts={accounts} members={members} />}
-        {view === "accounts" && <AccountsPage   accounts={accounts} members={members} onAccountsChange={setAccounts} />}
-        {view === "calendar" && <CalendarPage   accounts={accounts} members={members} />}
-        {view === "material" && <MaterialPage />}
+        {view === "content"   && <ContentManager accounts={accounts} members={members} />}
+        {view === "accounts"  && <AccountsPage   accounts={accounts} members={members} onAccountsChange={setAccounts} />}
+        {view === "calendar"  && <CalendarPage   accounts={accounts} members={members} />}
+        {view === "material"  && <MaterialPage />}
+        {view === "analytics" && <AnalyticsPage  accounts={accounts} />}
       </div>
 
       {/* ── Mobile bottom tab bar ── */}
