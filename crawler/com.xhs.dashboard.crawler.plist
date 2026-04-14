@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.xhs.dashboard.crawler</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/gabriel/MediaCrawler/.venv/bin/python</string>
+        <string>/Users/gabriel/Downloads/xhs-dashboard/crawler/server.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/gabriel/MediaCrawler</string>
+
+    <!-- 登录后自动启动 -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- 崩溃后自动重启 -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- 最小重启间隔30秒，防止崩溃循环 -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/gabriel/Downloads/xhs-dashboard/crawler/logs/server-out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/gabriel/Downloads/xhs-dashboard/crawler/logs/server-err.log</string>
+</dict>
+</plist>

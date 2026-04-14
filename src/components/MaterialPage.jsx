@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Plus, X, Trash2, ExternalLink } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Plus, X, Trash2, ExternalLink, RefreshCw, Heart, Bookmark, MessageCircle, Eye } from "lucide-react";
 import { supabase } from "../supabase.js";
 import { inputStyle, useIsMobile } from "./shared.jsx";
 
@@ -8,19 +8,53 @@ const TAG_COLOR = {
   "申请时间线": "#54A0FF", "选校避坑": "#FF9F43", "语言备考": "#A29BFE",
   "offer晒单": "#26DE81", "被拒复盘": "#FF7A7A", "申请焦虑": "#FF2442", "海外日常": "#00CFCF",
 };
+const COUNTRIES = ["英国", "美国", "澳洲", "加拿大", "新加坡", "香港"];
+const COUNTRY_COLOR = {
+  "英国": "#FF7A7A", "美国": "#A29BFE", "澳洲": "#FF9F43",
+  "加拿大": "#54A0FF", "新加坡": "#26DE81", "香港": "#FF2442",
+};
 
-const BENCH_COLS = [
-  { key: "name",           label: "账号昵称",     required: true, width: 130 },
-  { key: "destination",    label: "目的地方向",   width: 110 },
-  { key: "content_type",   label: "主要内容类型", width: 130 },
-  { key: "recent_data",    label: "近期数据",     width: 110 },
-  { key: "note_direction", label: "好的笔记方向", width: 180 },
-  { key: "consumer_words", label: "评论区消费词", width: 160 },
-];
+function fmt(n) {
+  if (!n) return "0";
+  if (n >= 10000) return (n / 10000).toFixed(1) + "w";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  return String(n);
+}
 
-/* ── 通用空状态 ── */
 function Empty({ text }) {
   return <div style={{ textAlign: "center", padding: "40px 0", color: "#333", fontSize: 13 }}>{text}</div>;
+}
+
+/* ── 状态标签 ── */
+function FetchBadge({ status }) {
+  const map = {
+    pending: { label: "等待中", color: "#FF9F43" },
+    loading: { label: "抓取中", color: "#54A0FF" },
+    done:    { label: "已同步", color: "#26DE81" },
+    error:   { label: "抓取失败", color: "#FF4444" },
+    idle:    null,
+  };
+  const s = map[status];
+  if (!s) return null;
+  return (
+    <span style={{
+      fontSize: 10, padding: "2px 8px", borderRadius: 10,
+      background: `${s.color}22`, color: s.color, border: `1px solid ${s.color}44`,
+      display: "inline-flex", alignItems: "center", gap: 4,
+    }}>
+      {status === "loading" && <RefreshCw size={9} style={{ animation: "spin 1s linear infinite" }} />}
+      {s.label}
+    </span>
+  );
+}
+
+/* ── Stat chip ── */
+function Stat({ icon, value, color = "#666" }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 12, color }}>
+      {icon}{fmt(value)}
+    </div>
+  );
 }
 
 /* ─────────────────────────────────
@@ -31,10 +65,21 @@ function BenchmarkTab() {
   const [rows, setRows]         = useState([]);
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm]         = useState({});
+  const [form, setForm]         = useState({ xhs_url: "", destination: "", content_type: "", note_direction: "", consumer_words: "" });
   const [saving, setSaving]     = useState(false);
+  const [expanded, setExpanded] = useState(null); // id of expanded account card
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Realtime 订阅：自动更新抓取结果
+    const sub = supabase
+      .channel("benchmark_accounts_changes")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "benchmark_accounts" }, payload => {
+        setRows(prev => prev.map(r => r.id === payload.new.id ? { ...r, ...payload.new } : r));
+      })
+      .subscribe();
+    return () => supabase.removeChannel(sub);
+  }, []);
 
   const load = async () => {
     const { data } = await supabase.from("benchmark_accounts").select("*").order("created_at", { ascending: false });
@@ -45,15 +90,23 @@ function BenchmarkTab() {
   const f = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const handleAdd = async () => {
-    if (!form.name?.trim()) { alert("请填写账号昵称"); return; }
+    const url = form.xhs_url.trim();
+    if (!url) { alert("请填写小红书账号链接"); return; }
     setSaving(true);
-    const payload = {};
-    BENCH_COLS.forEach(c => { payload[c.key] = form[c.key]?.trim() || null; });
+    const payload = {
+      xhs_url:       url,
+      destination:   form.destination.trim() || null,
+      content_type:  form.content_type.trim() || null,
+      note_direction: form.note_direction.trim() || null,
+      consumer_words: form.consumer_words.trim() || null,
+      name:          "加载中…",
+      fetch_status:  "pending",
+    };
     const { data, error } = await supabase.from("benchmark_accounts").insert([payload]).select().single();
     setSaving(false);
     if (error) { alert("添加失败：" + error.message); return; }
     setRows(p => [data, ...p]);
-    setForm({});
+    setForm({ xhs_url: "", destination: "", content_type: "", note_direction: "", consumer_words: "" });
     setShowForm(false);
   };
 
@@ -64,11 +117,22 @@ function BenchmarkTab() {
     setRows(p => p.filter(r => r.id !== id));
   };
 
+  const handleRetry = async (row) => {
+    await supabase.from("benchmark_accounts").update({ fetch_status: "pending" }).eq("id", row.id);
+    setRows(p => p.map(r => r.id === row.id ? { ...r, fetch_status: "pending" } : r));
+  };
+
   if (loading) return <div style={{ color: "#444", padding: 24 }}>加载中…</div>;
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+      {/* CSS spin animation */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <span style={{ fontSize: 12, color: "#444" }}>
+          粘贴账号链接，爬虫自动抓取账号信息和最近10条帖子
+        </span>
         <button onClick={() => setShowForm(p => !p)} style={{
           display: "flex", alignItems: "center", gap: 7,
           padding: "8px 16px", background: showForm ? "#333" : "#FF2442",
@@ -78,29 +142,37 @@ function BenchmarkTab() {
         </button>
       </div>
 
-      {/* Add form */}
+      {/* 添加表单 */}
       {showForm && (
-        <div style={{
-          background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10,
-          padding: 16, marginBottom: 16,
-        }}>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 10, marginBottom: 12 }}>
-            {BENCH_COLS.map(c => (
+        <div style={{ background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: 16, marginBottom: 16 }}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>小红书账号主页链接 *</label>
+            <input
+              value={form.xhs_url}
+              onChange={e => f("xhs_url", e.target.value)}
+              placeholder="https://www.xiaohongshu.com/user/profile/xxx?xsec_token=…（需带 xsec_token）"
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 10, color: "#444", marginTop: 4 }}>
+              在 PC 端登录小红书，打开账号主页，复制地址栏完整链接
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 10, marginBottom: 12 }}>
+            {[
+              { key: "destination",   label: "目的地方向（可选）",   placeholder: "英国 / 美国 / 澳洲…" },
+              { key: "content_type",  label: "主要内容类型（可选）", placeholder: "申请日记 / 海外日常…" },
+              { key: "note_direction",label: "好的笔记方向（可选）", placeholder: "选校攻略 / 语言备考…" },
+              { key: "consumer_words",label: "评论区消费词（可选）", placeholder: "求问 / 同款…" },
+            ].map(c => (
               <div key={c.key}>
-                <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>
-                  {c.label}{c.required && " *"}
-                </label>
-                <input
-                  value={form[c.key] || ""}
-                  onChange={e => f(c.key, e.target.value)}
-                  style={{ ...inputStyle, padding: "7px 10px" }}
-                  placeholder={c.label}
-                />
+                <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>{c.label}</label>
+                <input value={form[c.key]} onChange={e => f(c.key, e.target.value)}
+                  placeholder={c.placeholder} style={{ ...inputStyle, padding: "7px 10px" }} />
               </div>
             ))}
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <button onClick={() => { setShowForm(false); setForm({}); }} style={{
+            <button onClick={() => { setShowForm(false); setForm({ xhs_url: "", destination: "", content_type: "", note_direction: "", consumer_words: "" }); }} style={{
               padding: "8px 16px", background: "transparent", border: "1px solid #2a2a2a",
               borderRadius: 7, color: "#666", fontSize: 13, cursor: "pointer",
             }}>取消</button>
@@ -108,77 +180,138 @@ function BenchmarkTab() {
               padding: "8px 16px", background: saving ? "#555" : "#FF2442",
               border: "none", borderRadius: 7, color: "#fff", fontSize: 13,
               fontWeight: 600, cursor: saving ? "not-allowed" : "pointer",
-            }}>{saving ? "保存中…" : "保存"}</button>
+            }}>{saving ? "添加中…" : "添加"}</button>
           </div>
         </div>
       )}
 
-      {rows.length === 0 ? <Empty text="暂无对标账号，点击「添加账号」开始记录" /> : (
-        isMobile ? (
-          /* Mobile: card list */
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {rows.map(row => (
-              <div key={row.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 10, padding: "14px 16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: "#e0e0e0" }}>{row.name}</span>
-                  <button onClick={() => handleDelete(row.id)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 2 }}>
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                {BENCH_COLS.slice(1).map(c => row[c.key] && (
-                  <div key={c.key} style={{ display: "flex", gap: 8, marginBottom: 5 }}>
-                    <span style={{ fontSize: 11, color: "#555", flexShrink: 0, width: 80 }}>{c.label}</span>
-                    <span style={{ fontSize: 12, color: "#bbb" }}>{row[c.key]}</span>
+      {/* 账号卡片列表 */}
+      {rows.length === 0 ? <Empty text="暂无对标账号，点击「添加账号」并粘贴小红书链接" /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {rows.map(row => {
+            const isExpanded = expanded === row.id;
+            const recentPosts = Array.isArray(row.recent_posts) ? row.recent_posts : [];
+
+            return (
+              <div key={row.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, overflow: "hidden" }}>
+                {/* 账号头部 */}
+                <div style={{ padding: "16px 18px", display: "flex", alignItems: "flex-start", gap: 14 }}>
+                  {/* 头像 */}
+                  <div style={{ flexShrink: 0 }}>
+                    {row.avatar_url ? (
+                      <img src={row.avatar_url} alt="" style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", background: "#222" }} />
+                    ) : (
+                      <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#222", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, color: "#444" }}>
+                        {row.name?.[0] || "?"}
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        ) : (
-          /* Desktop: table */
-          <div style={{ border: "1px solid #1e1e1e", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                <thead>
-                  <tr style={{ background: "#0d0d0d" }}>
-                    {BENCH_COLS.map(c => (
-                      <th key={c.key} style={{
-                        padding: "10px 14px", textAlign: "left", color: "#555",
-                        fontSize: 11, fontWeight: 600, letterSpacing: "0.05em",
-                        borderBottom: "1px solid #1e1e1e", whiteSpace: "nowrap",
-                      }}>{c.label}</th>
-                    ))}
-                    <th style={{ padding: "10px 14px", borderBottom: "1px solid #1e1e1e", width: 40 }} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, i) => (
-                    <tr key={row.id} style={{ background: i % 2 === 0 ? "#111" : "#0e0e0e" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#161616"}
-                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#111" : "#0e0e0e"}
-                    >
-                      {BENCH_COLS.map(c => (
-                        <td key={c.key} style={{
-                          padding: "11px 14px", color: c.key === "name" ? "#e0e0e0" : "#888",
-                          fontWeight: c.key === "name" ? 600 : 400,
-                          borderBottom: "1px solid #1a1a1a", maxWidth: c.width,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>{row[c.key] || <span style={{ color: "#2a2a2a" }}>—</span>}</td>
+
+                  {/* 账号信息 */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                      <span style={{ fontSize: 15, fontWeight: 600, color: "#e0e0e0" }}>{row.name}</span>
+                      <FetchBadge status={row.fetch_status} />
+                    </div>
+                    {row.followers > 0 && (
+                      <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>
+                        {fmt(row.followers)} 粉丝
+                      </div>
+                    )}
+                    {row.bio && (
+                      <div style={{ fontSize: 12, color: "#555", lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                        {row.bio}
+                      </div>
+                    )}
+                    {/* 人工标注字段 */}
+                    {(row.destination || row.content_type) && (
+                      <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                        {row.destination && <span style={{ fontSize: 11, color: "#54A0FF", background: "#54A0FF18", padding: "2px 8px", borderRadius: 10, border: "1px solid #54A0FF33" }}>{row.destination}</span>}
+                        {row.content_type && <span style={{ fontSize: 11, color: "#FF9F43", background: "#FF9F4318", padding: "2px 8px", borderRadius: 10, border: "1px solid #FF9F4333" }}>{row.content_type}</span>}
+                      </div>
+                    )}
+                    {row.fetch_status === "error" && (
+                      <button onClick={() => handleRetry(row)} style={{ marginTop: 6, fontSize: 11, color: "#FF9F43", background: "none", border: "1px solid #FF9F4344", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}>
+                        重试抓取
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 操作 */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
+                    {recentPosts.length > 0 && (
+                      <button onClick={() => setExpanded(isExpanded ? null : row.id)} style={{
+                        fontSize: 11, color: "#666", background: "none", border: "1px solid #2a2a2a",
+                        borderRadius: 6, padding: "4px 10px", cursor: "pointer",
+                      }}>
+                        {isExpanded ? "收起" : `查看 ${recentPosts.length} 条帖子`}
+                      </button>
+                    )}
+                    {row.xhs_url && (
+                      <a href={row.xhs_url} target="_blank" rel="noopener noreferrer" style={{ color: "#555", display: "flex", alignItems: "center" }}>
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
+                    <button onClick={() => handleDelete(row.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 2 }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
+                      onMouseLeave={e => e.currentTarget.style.color = "#333"}>
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 最近帖子网格 */}
+                {isExpanded && recentPosts.length > 0 && (
+                  <div style={{ borderTop: "1px solid #1a1a1a", padding: "12px 18px" }}>
+                    <div style={{ fontSize: 11, color: "#444", marginBottom: 10, fontWeight: 500 }}>最近 {recentPosts.length} 条帖子</div>
+                    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(5, 1fr)", gap: 8 }}>
+                      {recentPosts.map((p, i) => (
+                        <a
+                          key={i}
+                          href={p.note_id ? `https://www.xiaohongshu.com/explore/${p.note_id}` : "#"}
+                          target="_blank" rel="noopener noreferrer"
+                          style={{ textDecoration: "none", display: "block" }}
+                        >
+                          <div style={{ aspectRatio: "3/4", borderRadius: 8, overflow: "hidden", background: "#1a1a1a", position: "relative", cursor: "pointer" }}>
+                            {p.cover_image ? (
+                              <img src={p.cover_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            ) : (
+                              <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#2a2a2a", fontSize: 20 }}>📝</div>
+                            )}
+                            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.85) 100%)" }} />
+                            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "6px 8px" }}>
+                              <div style={{ fontSize: 10, color: "#fff", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", lineHeight: 1.4, marginBottom: 3 }}>
+                                {p.title || "无标题"}
+                              </div>
+                              {p.likes > 0 && (
+                                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", display: "flex", alignItems: "center", gap: 3 }}>
+                                  <Heart size={8} /> {fmt(p.likes)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </a>
                       ))}
-                      <td style={{ padding: "11px 10px", borderBottom: "1px solid #1a1a1a", textAlign: "center" }}>
-                        <button onClick={() => handleDelete(row.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 4 }}
-                          onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
-                          onMouseLeave={e => e.currentTarget.style.color = "#333"}>
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading skeleton for recent posts */}
+                {(row.fetch_status === "pending" || row.fetch_status === "loading") && (
+                  <div style={{ borderTop: "1px solid #1a1a1a", padding: "12px 18px" }}>
+                    <div style={{ fontSize: 11, color: "#444", marginBottom: 10 }}>正在抓取最近帖子…</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <div key={i} style={{ aspectRatio: "3/4", borderRadius: 8, background: "#1a1a1a", animation: "pulse 1.5s ease-in-out infinite" }} />
+                      ))}
+                    </div>
+                    <style>{`@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.7} }`}</style>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -196,7 +329,16 @@ function TopicsTab() {
   const [form, setForm]         = useState({ description: "", tag: TOPIC_TAGS[0], reference_url: "" });
   const [saving, setSaving]     = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const sub = supabase
+      .channel("topics_changes")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "topics" }, payload => {
+        setItems(prev => prev.map(i => i.id === payload.new.id ? { ...i, ...payload.new } : i));
+      })
+      .subscribe();
+    return () => supabase.removeChannel(sub);
+  }, []);
 
   const load = async () => {
     const { data } = await supabase.from("topics").select("*").order("created_at", { ascending: false });
@@ -207,10 +349,12 @@ function TopicsTab() {
   const handleAdd = async () => {
     if (!form.description.trim()) { alert("请填写选题描述"); return; }
     setSaving(true);
+    const refUrl = form.reference_url.trim() || null;
     const { data, error } = await supabase.from("topics").insert([{
       description: form.description.trim(),
       tag: form.tag,
-      reference_url: form.reference_url.trim() || null,
+      reference_url: refUrl,
+      fetch_status: refUrl && refUrl.includes("xiaohongshu.com") ? "pending" : "idle",
     }]).select().single();
     setSaving(false);
     if (error) { alert("添加失败：" + error.message); return; }
@@ -232,7 +376,6 @@ function TopicsTab() {
 
   return (
     <div>
-      {/* Filter + Add */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {["全部", ...TOPIC_TAGS].map(t => {
@@ -258,7 +401,6 @@ function TopicsTab() {
         </button>
       </div>
 
-      {/* Add form */}
       {showForm && (
         <div style={{ background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: 16, marginBottom: 16 }}>
           <div style={{ marginBottom: 10 }}>
@@ -267,9 +409,10 @@ function TopicsTab() {
               placeholder="描述这个选题方向的核心内容…" style={{ ...inputStyle, resize: "vertical" }} />
           </div>
           <div style={{ marginBottom: 10 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>参考链接（可选）</label>
+            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>参考帖子链接（可选，自动监控数据）</label>
             <input value={form.reference_url} onChange={e => setForm(p => ({ ...p, reference_url: e.target.value }))}
-              placeholder="https://www.xiaohongshu.com/explore/…" style={inputStyle} />
+              placeholder="https://www.xiaohongshu.com/explore/…?xsec_token=…" style={inputStyle} />
+            <div style={{ fontSize: 10, color: "#444", marginTop: 3 }}>填写小红书帖子链接，爬虫自动抓取点赞/收藏/浏览数据</div>
           </div>
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 7 }}>类型标签</label>
@@ -306,6 +449,7 @@ function TopicsTab() {
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 10 }}>
           {filtered.map(item => {
             const color = TAG_COLOR[item.tag] || "#555";
+            const hasStats = item.ref_likes > 0 || item.ref_saves > 0 || item.ref_views > 0;
             return (
               <div key={item.id} style={{
                 background: "#111", border: "1px solid #1e1e1e", borderRadius: 10,
@@ -319,18 +463,30 @@ function TopicsTab() {
                     <Trash2 size={14} />
                   </button>
                 </div>
+
+                {/* 参考帖子数据 */}
                 {item.reference_url && (
-                  <a href={item.reference_url} target="_blank" rel="noopener noreferrer" style={{
-                    display: "inline-flex", alignItems: "center", gap: 4,
-                    fontSize: 11, color: "#FF2442", textDecoration: "none", marginTop: 8,
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = "0.75"}
-                    onMouseLeave={e => e.currentTarget.style.opacity = "1"}
-                  >
-                    <ExternalLink size={10} /> 查看参考帖子
-                  </a>
+                  <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <a href={item.reference_url} target="_blank" rel="noopener noreferrer" style={{
+                      display: "inline-flex", alignItems: "center", gap: 4,
+                      fontSize: 11, color: "#FF2442", textDecoration: "none",
+                    }}>
+                      <ExternalLink size={10} /> 参考帖子
+                    </a>
+                    {hasStats && (
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <Stat icon={<Heart size={10} />} value={item.ref_likes} color="#FF7A7A" />
+                        <Stat icon={<Bookmark size={10} />} value={item.ref_saves} color="#A29BFE" />
+                        <Stat icon={<Eye size={10} />} value={item.ref_views} color="#888" />
+                      </div>
+                    )}
+                    {item.fetch_status === "pending" || item.fetch_status === "loading" ? (
+                      <FetchBadge status={item.fetch_status} />
+                    ) : null}
+                  </div>
                 )}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
                   <span style={{
                     fontSize: 11, padding: "2px 10px", borderRadius: 20,
                     background: `${color}18`, color: color, border: `1px solid ${color}44`,
@@ -386,7 +542,6 @@ function TitlesTab() {
 
   return (
     <div>
-      {/* Input row */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <input
           value={input}
@@ -416,9 +571,7 @@ function TitlesTab() {
               onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#111" : "#0e0e0e"}
             >
               <span style={{ flex: 1, fontSize: 13, color: "#ddd", lineHeight: 1.5 }}>{item.title}</span>
-              <span style={{ fontSize: 11, color: "#333", flexShrink: 0 }}>
-                {new Date(item.created_at).toLocaleDateString("zh-CN")}
-              </span>
+              <span style={{ fontSize: 11, color: "#333", flexShrink: 0 }}>{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
               <button onClick={() => handleDelete(item.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 4, flexShrink: 0 }}
                 onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
                 onMouseLeave={e => e.currentTarget.style.color = "#333"}>
@@ -472,7 +625,6 @@ function BannedWordsTab() {
 
   return (
     <div>
-      {/* Input */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         <input
           value={input}
@@ -521,12 +673,6 @@ function BannedWordsTab() {
 /* ─────────────────────────────────
    Tab 5: 爆款收藏
 ───────────────────────────────── */
-const COUNTRIES = ["英国", "美国", "澳洲", "加拿大", "新加坡", "香港"];
-const COUNTRY_COLOR = {
-  "英国": "#FF7A7A", "美国": "#A29BFE", "澳洲": "#FF9F43",
-  "加拿大": "#54A0FF", "新加坡": "#26DE81", "香港": "#FF2442",
-};
-
 function ViralPostsTab() {
   const isMobile = useIsMobile();
   const [items, setItems]       = useState([]);
@@ -536,7 +682,17 @@ function ViralPostsTab() {
   const [form, setForm]         = useState({ url: "", note: "", country: COUNTRIES[0] });
   const [saving, setSaving]     = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Realtime 订阅：爬虫更新数据时自动刷新卡片
+    const sub = supabase
+      .channel("viral_posts_changes")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "viral_posts" }, payload => {
+        setItems(prev => prev.map(i => i.id === payload.new.id ? { ...i, ...payload.new } : i));
+      })
+      .subscribe();
+    return () => supabase.removeChannel(sub);
+  }, []);
 
   const load = async () => {
     const { data } = await supabase.from("viral_posts").select("*").order("created_at", { ascending: false });
@@ -545,12 +701,14 @@ function ViralPostsTab() {
   };
 
   const handleAdd = async () => {
-    if (!form.url.trim()) { alert("请填写帖子链接"); return; }
+    const url = form.url.trim();
+    if (!url) { alert("请填写帖子链接"); return; }
     setSaving(true);
     const { data, error } = await supabase.from("viral_posts").insert([{
-      url: form.url.trim(),
+      url,
       note: form.note.trim() || null,
       country: form.country,
+      fetch_status: "pending",  // 触发爬虫
     }]).select().single();
     setSaving(false);
     if (error) { alert("添加失败：" + error.message); return; }
@@ -566,13 +724,17 @@ function ViralPostsTab() {
     setItems(p => p.filter(i => i.id !== id));
   };
 
+  const handleRetry = async (id) => {
+    await supabase.from("viral_posts").update({ fetch_status: "pending" }).eq("id", id);
+    setItems(p => p.map(i => i.id === id ? { ...i, fetch_status: "pending" } : i));
+  };
+
   const filtered = filter === "全部" ? items : items.filter(i => i.country === filter);
 
   if (loading) return <div style={{ color: "#444", padding: 24 }}>加载中…</div>;
 
   return (
     <div>
-      {/* Filter + Add */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {["全部", ...COUNTRIES].map(c => {
@@ -598,16 +760,17 @@ function ViralPostsTab() {
         </button>
       </div>
 
-      {/* Add form */}
+      {/* 添加表单 */}
       {showForm && (
         <div style={{ background: "#0d0d0d", border: "1px solid #2a2a2a", borderRadius: 10, padding: 16, marginBottom: 16 }}>
           <div style={{ marginBottom: 10 }}>
             <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>帖子链接 *</label>
             <input value={form.url} onChange={e => setForm(p => ({ ...p, url: e.target.value }))}
-              placeholder="https://www.xiaohongshu.com/explore/…" style={inputStyle} />
+              placeholder="小红书帖子链接（短链或完整链接均可）" style={inputStyle} />
+            <div style={{ fontSize: 10, color: "#444", marginTop: 3 }}>支持 xhslink.com 短链，爬虫自动抓取标题、封面图、数据</div>
           </div>
           <div style={{ marginBottom: 10 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>备注说明</label>
+            <label style={{ display: "block", fontSize: 11, color: "#555", marginBottom: 5 }}>备注说明（可选）</label>
             <input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))}
               placeholder="为什么觉得这条不错？" style={inputStyle} />
           </div>
@@ -642,44 +805,97 @@ function ViralPostsTab() {
         </div>
       )}
 
+      {/* 帖子卡片网格 */}
       {filtered.length === 0 ? <Empty text="暂无收藏帖子" /> : (
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", gap: 12 }}>
           {filtered.map(item => {
             const color = COUNTRY_COLOR[item.country] || "#555";
+            const isLoading = item.fetch_status === "pending" || item.fetch_status === "loading";
+            const isDone = item.fetch_status === "done";
+            const isError = item.fetch_status === "error";
+
             return (
-              <div key={item.id} style={{
-                background: "#111", border: "1px solid #1e1e1e", borderRadius: 10,
-                padding: "14px 16px", borderLeft: `3px solid ${color}`,
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 10 }}>
-                  <a href={item.url} target="_blank" rel="noopener noreferrer" style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    fontSize: 13, color: "#FF2442", textDecoration: "none",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+              <div key={item.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, overflow: "hidden" }}>
+                {/* 封面图 */}
+                <div style={{ aspectRatio: "3/4", position: "relative", background: "#1a1a1a" }}>
+                  {item.cover_image ? (
+                    <img src={item.cover_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : isLoading ? (
+                    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                      <RefreshCw size={20} color="#333" style={{ animation: "spin 1s linear infinite" }} />
+                      <span style={{ fontSize: 11, color: "#444" }}>正在抓取…</span>
+                    </div>
+                  ) : (
+                    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <span style={{ fontSize: 28 }}>📌</span>
+                    </div>
+                  )}
+
+                  {/* 渐变遮罩 + 底部信息 */}
+                  {(item.title || isDone) && (
+                    <>
+                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.9) 100%)" }} />
+                      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "10px 12px" }}>
+                        {item.title && (
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#fff", lineHeight: 1.4, marginBottom: 6, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                            {item.title}
+                          </div>
+                        )}
+                        {isDone && (item.likes > 0 || item.saves > 0) && (
+                          <div style={{ display: "flex", gap: 10 }}>
+                            <Stat icon={<Heart size={10} />} value={item.likes} color="rgba(255,255,255,0.7)" />
+                            <Stat icon={<Bookmark size={10} />} value={item.saves} color="rgba(255,255,255,0.7)" />
+                            <Stat icon={<MessageCircle size={10} />} value={item.comments} color="rgba(255,255,255,0.7)" />
+                            {item.views > 0 && <Stat icon={<Eye size={10} />} value={item.views} color="rgba(255,255,255,0.7)" />}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* 国家标签 */}
+                  <div style={{ position: "absolute", top: 8, left: 8 }}>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: `${color}cc`, color: "#fff", fontWeight: 600 }}>{item.country}</span>
+                  </div>
+
+                  {/* 删除按钮 */}
+                  <button onClick={() => handleDelete(item.id)} style={{
+                    position: "absolute", top: 6, right: 6,
+                    background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%",
+                    width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
+                    color: "#aaa", cursor: "pointer",
                   }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = "0.75"}
-                    onMouseLeave={e => e.currentTarget.style.opacity = "1"}
-                  >
-                    <ExternalLink size={12} style={{ flexShrink: 0 }} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.url}</span>
-                  </a>
-                  <button onClick={() => handleDelete(item.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 2, flexShrink: 0 }}
                     onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
-                    onMouseLeave={e => e.currentTarget.style.color = "#333"}>
-                    <Trash2 size={14} />
+                    onMouseLeave={e => e.currentTarget.style.color = "#aaa"}
+                  >
+                    <X size={12} />
                   </button>
                 </div>
-                {item.note && (
-                  <p style={{ fontSize: 12, color: "#888", margin: "0 0 10px", lineHeight: 1.55 }}>{item.note}</p>
-                )}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{
-                    fontSize: 11, padding: "2px 10px", borderRadius: 20,
-                    background: `${color}18`, color: color, border: `1px solid ${color}44`,
-                  }}>{item.country}</span>
-                  <span style={{ fontSize: 11, color: "#333" }}>
-                    {new Date(item.created_at).toLocaleDateString("zh-CN")}
-                  </span>
+
+                {/* 卡片底部 */}
+                <div style={{ padding: "10px 12px" }}>
+                  {item.author_name && (
+                    <div style={{ fontSize: 11, color: "#555", marginBottom: 4 }}>@{item.author_name}</div>
+                  )}
+                  {item.note && (
+                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.5, marginBottom: 6 }}>{item.note}</div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <FetchBadge status={isError ? "error" : isLoading ? item.fetch_status : null} />
+                      {isError && (
+                        <button onClick={() => handleRetry(item.id)} style={{ fontSize: 10, color: "#FF9F43", background: "none", border: "1px solid #FF9F4344", borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>
+                          重试
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ color: "#444", display: "flex" }}>
+                        <ExternalLink size={12} />
+                      </a>
+                      <span style={{ fontSize: 10, color: "#333" }}>{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
@@ -701,18 +917,17 @@ export default function MaterialPage() {
 
   return (
     <div style={{ padding: isMobile ? 16 : 32, maxWidth: 1100 }}>
-      {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, color: "#fff", margin: 0 }}>素材库</h1>
-        <p style={{ color: "#555", fontSize: 13, margin: "5px 0 0" }}>对标账号、选题方向、标题灵感、违禁词、爆款收藏</p>
+        <p style={{ color: "#555", fontSize: 13, margin: "5px 0 0" }}>
+          对标账号、选题方向、标题灵感、违禁词、爆款收藏 · 粘贴小红书链接自动抓取数据
+        </p>
       </div>
 
-      {/* Tab bar */}
       <div style={{
         display: "flex", gap: 2, marginBottom: 24,
         background: "#0d0d0d", border: "1px solid #1e1e1e",
-        borderRadius: 10, padding: 4,
-        overflowX: "auto",
+        borderRadius: 10, padding: 4, overflowX: "auto",
       }}>
         {TABS.map((t, i) => (
           <button key={t} onClick={() => setTab(i)} style={{
@@ -722,13 +937,11 @@ export default function MaterialPage() {
             background: tab === i ? "#1a1a1a" : "transparent",
             color: tab === i ? "#e0e0e0" : "#555",
             fontSize: 13, fontWeight: tab === i ? 600 : 400,
-            whiteSpace: "nowrap",
-            transition: "all 0.1s",
+            whiteSpace: "nowrap", transition: "all 0.1s",
           }}>{t}</button>
         ))}
       </div>
 
-      {/* Tab content */}
       {tab === 0 && <BenchmarkTab />}
       {tab === 1 && <TopicsTab />}
       {tab === 2 && <TitlesTab />}
