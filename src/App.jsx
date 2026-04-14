@@ -167,7 +167,7 @@ export default function App() {
                 padding: "7px 8px", borderRadius: 6, cursor: "pointer", marginBottom: 2,
               }}>
                 <div style={{ width: 20, height: 20, borderRadius: "50%", background: acc.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
-                  {acc.avatar || acc.name?.[0] || "?"}
+                  {acc.avatar?.startsWith("http") ? (acc.name?.[0] || "?") : (acc.avatar || acc.name?.[0] || "?")}
                 </div>
                 <span style={{ fontSize: 12, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</span>
               </div>

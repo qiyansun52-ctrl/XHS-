@@ -325,6 +325,7 @@ export default function ContentManager({ accounts, members }) {
           members={members}
           onClose={() => setSelected(null)}
           onStatusChange={handleStatusChange}
+          onDelete={id => setPosts(prev => prev.filter(p => p.id !== id))}
         />
       )}
 

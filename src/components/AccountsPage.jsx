@@ -43,7 +43,7 @@ function AddAccountModal({ onClose, onAdd, onUpdate, account }) {
     setSaving(true);
     const payload = {
       name:         form.name.trim(),
-      avatar:       (form.avatar.trim() || form.name.trim()[0]?.toUpperCase() || "?"),
+      avatar:       form.avatar.trim().startsWith("http") ? form.avatar.trim() : (form.avatar.trim() || form.name.trim()[0]?.toUpperCase() || "?"),
       flag:         form.flag,
       color:        form.color,
       xhs_link:     form.xhs_link.trim() || null,
@@ -105,16 +105,18 @@ function AddAccountModal({ onClose, onAdd, onUpdate, account }) {
         </div>
 
         {/* Name + avatar letter */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: form.avatar?.startsWith("http") ? "1fr" : "1fr 100px", gap: 12, marginBottom: 16 }}>
           <div>
             <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 7, fontWeight: 500 }}>账号名称 *</label>
             <input value={form.name} onChange={e => f("name", e.target.value)} placeholder="e.g. Emily_英国读研" style={inputStyle} />
           </div>
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 7, fontWeight: 500 }}>头像字母</label>
-            <input value={form.avatar} onChange={e => f("avatar", e.target.value.slice(0, 2))}
-              placeholder="E" maxLength={2} style={{ ...inputStyle, textAlign: "center" }} />
-          </div>
+          {!form.avatar?.startsWith("http") && (
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 7, fontWeight: 500 }}>头像字母</label>
+              <input value={form.avatar} onChange={e => f("avatar", e.target.value.slice(0, 2))}
+                placeholder="E" maxLength={2} style={{ ...inputStyle, textAlign: "center" }} />
+            </div>
+          )}
         </div>
 
         {/* XHS link */}

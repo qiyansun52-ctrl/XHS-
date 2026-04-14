@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import {
-  X, ChevronLeft, ChevronRight,
+  X, ChevronLeft, ChevronRight, Trash2,
   Eye, Heart, Bookmark, MessageCircle, Clock, User, Download,
 } from "lucide-react";
 import { supabase } from "../supabase.js";
 import { Avatar, Badge, fmt, useIsMobile } from "./shared.jsx";
 
-export default function PostDetailDrawer({ post, accounts, members, onClose, onStatusChange }) {
+export default function PostDetailDrawer({ post, accounts, members, onClose, onStatusChange, onDelete }) {
   const isMobile = useIsMobile();
   const [imageIdx, setImageIdx]     = useState(0);
   const [stats, setStats]           = useState(null);
@@ -69,6 +69,14 @@ export default function PostDetailDrawer({ post, accounts, members, onClose, onS
     }
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm(`确定要删除帖子「${post.title}」吗？此操作不可撤销。`)) return;
+    const { error } = await supabase.from("posts").delete().eq("id", post.id);
+    if (error) { alert("删除失败：" + error.message); return; }
+    onDelete?.(post.id);
+    onClose();
+  };
+
   const changeStatus = async (newStatus) => {
     const { error } = await supabase.from("posts").update({ status: newStatus }).eq("id", post.id);
     if (error) { alert("状态更新失败: " + error.message); return; }
@@ -113,9 +121,17 @@ export default function PostDetailDrawer({ post, accounts, members, onClose, onS
               <div style={{ marginTop: 3 }}><Badge status={post.status} /></div>
             </div>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 4 }}>
-            <X size={18} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={handleDelete} title="删除帖子" style={{
+              background: "none", border: "none", color: "#555", cursor: "pointer", padding: 4,
+            }} onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
+               onMouseLeave={e => e.currentTarget.style.color = "#555"}>
+              <Trash2 size={16} />
+            </button>
+            <button onClick={onClose} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 4 }}>
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "20px" }}>

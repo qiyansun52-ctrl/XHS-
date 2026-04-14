@@ -1,38 +1,84 @@
-# XHS 管理台 — Claude Code 上下文
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目简介
 
-这是一个小红书团队内部管理平台，供 4-8 名非技术背景的团队成员使用。
-团队运营 6 个小红书账号，账号定位是已完成本科海外留学、收到研究生 offer 的留学生人设，目标受众是准备申请英国、美国、澳大利亚、加拿大的中国学生。
-平台核心目标：统一管理内容排期、监控账号流量数据、协调团队分工。
+小红书团队内部管理平台，供 4-8 名非技术背景成员使用。团队运营若干个海外留学生人设账号（目标受众：准备申请英美澳加的中国学生）。核心功能：内容排期、账号数据监控、团队分工、素材管理。
 
-## 技术栈
+## 常用命令
 
-- **前端**：React 18 + Vite + Recharts + Lucide React
-- **数据库**：Supabase（PostgreSQL + Realtime + Storage）
-- **部署**：Vercel（前端）
-- **样式**：纯 CSS-in-JS（inline styles），无 CSS 框架
-- **语言**：JavaScript（非 TypeScript）
+```bash
+npm run dev       # 本地开发服务器（Vite，热更新）
+npm run build     # 生产构建，输出到 dist/
+npm run preview   # 预览构建产物
+```
 
-## 项目结构
+环境变量需在 `.env` 中配置：
+```
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+```
+
+## 架构概览
+
+### 页面路由（无路由库）
+
+`App.jsx` 通过 `useState("accounts")` 控制当前视图，四个页面：
+- `"accounts"` → `AccountsPage`
+- `"content"` → `ContentManager`
+- `"calendar"` → `CalendarPage`
+- `"material"` → `MaterialPage`
+
+导航组件（桌面侧边栏 / 手机底部 tab 栏）直接调用 `setView`。
+
+### 数据流
+
+- **accounts / members**：由 `App.jsx` 从 Supabase 加载，通过 props 向下传递。accounts 完全由数据库驱动，无硬编码兜底。
+- **posts**：各用到的页面自行加载（`ContentManager`、`AccountsPage`、`CalendarPage` 各自维护独立的 posts state）。
+- **素材库数据**（`benchmark_accounts` / `topics` / `titles` / `banned_words`）：`MaterialPage` 内各 Tab 组件自行加载，互不共享。
+- **Realtime**：`App.jsx` 订阅 `accounts` 表；各页面订阅自己关心的表（目前主要是 `posts`）。
+
+### 组件层级
 
 ```
-xhs-dashboard/
-├── index.html
-├── vite.config.js
-├── package.json
-├── .env                          # VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
-├── schema.sql                    # Supabase 建表 SQL
-└── src/
-    ├── main.jsx                  # React 入口
-    ├── supabase.js               # Supabase client
-    ├── App.jsx                   # 主应用（当前所有逻辑在此文件）
-    └── components/               # 拆分后的组件目录
+App.jsx
+├── AccountsPage         账号列表 + 汇总统计 + 折线图
+│   ├── AccountDetail    单账号详情（内嵌，非独立路由）
+│   │   └── AddAccountModal  新增/编辑账号（同一个组件，account prop 控制模式）
+│   └── AccountInfoModal 只读展示账号所有字段（除手机号/密码）
+├── ContentManager       帖子网格（3:4卡片）+ 新建帖子弹窗
+├── CalendarPage         月视图日历（桌面）/ 日期列表（手机）
+├── MaterialPage         素材库，4个 Tab（对标账号/选题/标题/违禁词）
+└── PostDetailDrawer     帖子详情抽屉（多页面复用）
 ```
+
+`shared.jsx` 是唯一的共享层，导出：
+- `useIsMobile()` — 断点 768px，所有响应式判断统一用这个
+- `Avatar`, `Badge`, `StatPill`, `ChartTip` — UI 原子组件
+- `STATUS`, `ROLE_LABELS`, `PRESET_COLORS`, `FLAG_OPTIONS` — 常量
+- `fmt(n)`, `getWeekly(acc)` — 工具函数（`getWeekly` 当前用伪随机数模拟历史数据）
+
+### 模态框 / 抽屉模式
+
+- **弹窗**：桌面居中，手机底部 sheet（`alignItems: "flex-end"` + `borderRadius: "16px 16px 0 0"`）
+- **底部安全区**：`paddingBottom: "calc(Xpx + env(safe-area-inset-bottom))"`
+- **PostDetailDrawer**：桌面 480px 右侧固定，手机 92dvh 底部 sheet
+
+### AddAccountModal 双模式
+
+同一个组件处理新增和编辑：
+- 传入 `account` prop → 编辑模式，预填表单，保存调用 `onUpdate`
+- 不传 `account` → 新增模式，保存调用 `onAdd`
+
+### 图片上传流程
+
+1. `crypto.randomUUID()` 客户端生成 post ID
+2. 上传到 Supabase Storage：`post-images/{post_id}/{filename}`
+3. 获取 publicUrl 写入 `posts.images[]`
+4. 最后 insert post 记录（避免先有鸡先有蛋问题）
 
 ## 设计规范
-
-### 颜色
 
 | 用途 | 色值 |
 |------|------|
@@ -47,133 +93,44 @@ xhs-dashboard/
 | 文字主色 | `#e0e0e0` |
 | 文字次要 | `#666` / `#555` |
 
-### 6 个账号的固定颜色
-
-```js
-{ id: 1, name: "Emily_英国读研",  color: "#FF2442", flag: "🇬🇧" }
-{ id: 2, name: "Sophia_伦敦日记", color: "#FF7A7A", flag: "🇬🇧" }
-{ id: 3, name: "Chloe_澳洲留学", color: "#FF9F43", flag: "🇦🇺" }
-{ id: 4, name: "Amy_加拿大UBC",  color: "#54A0FF", flag: "🇨🇦" }
-{ id: 5, name: "Grace_美国读研", color: "#A29BFE", flag: "🇺🇸" }
-{ id: 6, name: "Anna_申请顾问", color: "#00CFCF", flag: "🌏" }
-```
-
-### 字体
-
-DM Sans（Google Fonts），通过 `<link>` 引入。
+字体：DM Sans，通过 `<link>` 在 `App.jsx` 内联引入 Google Fonts。
 
 ## 数据库（Supabase）
 
-### 已建的表
+完整建表 SQL 见 `schema.sql`。所有表都需启用 RLS：
 
 ```sql
--- 帖子内容
-create table posts (
-  id           uuid primary key default gen_random_uuid(),
-  account_id   integer not null,
-  title        text not null,
-  caption      text,
-  scheduled_at text,
-  status       text default 'draft' check (status in ('draft', 'scheduled', 'published')),
-  tags         text[],
-  img_count    integer default 0,
-  images       text[] default '{}',
-  uploader_id  uuid references members(id),
-  created_at   timestamp with time zone default now()
-);
+alter table [表名] enable row level security;
+create policy "team_access" on [表名] for all using (true) with check (true);
 ```
 
-### accounts 表（动态账号，替代原硬编码 ACCOUNTS）
+### 核心表
 
-```sql
-create table if not exists accounts (
-  id serial primary key,
-  name text not null,
-  avatar text,
-  flag text default '🌏',
-  color text default '#FF2442',
-  xhs_link text,
-  phone text,           -- 敏感，不在 UI 中展示
-  xhs_password text,    -- 敏感，不在 UI 中展示
-  bio text,
-  followers integer default 0,
-  views bigint default 0,
-  likes bigint default 0,
-  saves bigint default 0,
-  created_at timestamp with time zone default now()
-);
-alter table accounts enable row level security;
-create policy "team_access" on accounts for all using (true) with check (true);
+| 表名 | PK 类型 | 说明 |
+|------|---------|------|
+| `accounts` | serial | 含 `phone`、`xhs_password` 敏感字段，UI 不展示 |
+| `posts` | uuid | `scheduled_at` 存为 text（`"2025-04-07T10:30"` 格式） |
+| `members` | uuid | 角色：`operator` / `owner` / `admin` |
+| `account_assignments` | — | account_id → member_id 一对一 |
+| `post_stats` / `post_comments` | uuid | 帖子互动数据，供爬虫写入 |
+| `benchmark_accounts` | uuid | 素材库：对标账号 |
+| `topics` | uuid | 素材库：选题方向，含 tag 字段 |
+| `titles` | uuid | 素材库：标题灵感 |
+| `banned_words` | uuid | 素材库：违禁词，word 字段唯一 |
 
--- Seed 6 original accounts
-insert into accounts (id, name, avatar, flag, color, followers, views, likes, saves) values
-(1, 'Emily_英国读研',  'E', '🇬🇧', '#FF2442', 12400, 234000, 18900, 8900),
-(2, 'Sophia_伦敦日记', 'S', '🇬🇧', '#FF7A7A', 8200,  156000, 12300, 5600),
-(3, 'Chloe_澳洲留学', 'C', '🇦🇺', '#FF9F43', 15600, 312000, 24500, 11200),
-(4, 'Amy_加拿大UBC',  'A', '🇨🇦', '#54A0FF', 6800,  98000,  7600,  3400),
-(5, 'Grace_美国读研', 'G', '🇺🇸', '#A29BFE', 19200, 445000, 35800, 16700),
-(6, 'Anna_申请顾问',  'A', '🌏',  '#00CFCF', 9400,  178000, 14200, 7800)
-on conflict (id) do nothing;
-select setval('accounts_id_seq', (select max(id) from accounts));
-```
+Storage bucket：`post-images`（public）
 
-### 待建 / 已新增的表
+## 爬虫（`crawler/`）
 
-```sql
--- 团队成员
-create table members (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null,
-  role       text default 'operator' check (role in ('operator', 'owner', 'admin')),
-  created_at timestamp with time zone default now()
-);
-
--- 账号负责人分配
-create table account_assignments (
-  account_id integer not null,
-  member_id  uuid references members(id),
-  primary key (account_id)
-);
-
--- 帖子数据（点赞/收藏/评论/浏览）
-create table post_stats (
-  post_id  uuid references posts(id) on delete cascade,
-  likes    integer default 0,
-  saves    integer default 0,
-  comments integer default 0,
-  views    integer default 0,
-  primary key (post_id)
-);
-
--- 评论
-create table post_comments (
-  id         uuid primary key default gen_random_uuid(),
-  post_id    uuid references posts(id) on delete cascade,
-  commenter  text,
-  content    text,
-  created_at timestamp with time zone default now()
-);
-```
-
-### Storage
-
-- Bucket 名：`post-images`（public）
-- 上传路径格式：`{post_id}/{filename}`
-
-## 当前已实现的功能
-
-- 侧边栏导航（流量监控 / 内容管理）
-- 流量监控页：6个账号总览卡片、账号详情卡、近7日折线图
-- 内容管理页：帖子列表、草稿/排期/发布状态流转、新建帖子弹窗
-- Supabase 实时同步（所有人操作立即同步）
-- Vercel 部署
+基于 MediaCrawler 的数据同步脚本，目前不影响前端功能：
+- `import_stats.py` — 读取 MediaCrawler 导出 JSON，写入 `post_stats` 和 `account_stats_history`
+- `run.sh` — 本地一键运行（需先配置 `config.py`）
+- `.github/workflows/daily-crawl.yml` — GitHub Actions 每天北京时间 09:00 / 21:00 触发
 
 ## 重要约束
 
-- **不要使用 TypeScript**，保持纯 JavaScript
-- **不要引入 CSS 框架**（Tailwind、MUI 等），用 inline styles
-- **不要添加路由库**，用 `useState` 控制页面切换即可
-- 图片存储用 Supabase Storage，bucket 名为 `post-images`
-- 所有用户操作实时同步，用 Supabase Realtime channel
-- 非技术用户使用，UI 要简单，**错误提示要中文**
-- **修改代码时不要删除已有功能**，只在现有基础上新增
+- **不用 TypeScript**，保持纯 JavaScript
+- **不用 CSS 框架**，全部 inline styles
+- **不用路由库**，`useState` 控制视图切换
+- 错误提示必须用中文
+- 修改时不要删除已有功能，只在现有基础上新增

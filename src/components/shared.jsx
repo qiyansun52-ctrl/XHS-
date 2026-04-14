@@ -53,7 +53,8 @@ export function getWeekly(acc) {
 }
 
 export function Avatar({ acc, size = 36 }) {
-  const letter = acc?.avatar || (acc?.name?.[0]?.toUpperCase() || "?");
+  const raw = acc?.avatar || "";
+  const letter = (raw.startsWith("http") ? "" : raw) || acc?.name?.[0]?.toUpperCase() || "?";
   return (
     <div style={{
       width: size, height: size, borderRadius: "50%",
