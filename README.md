@@ -1,5 +1,11 @@
-# XHS Dashboard — Xiaohongshu Team Management Platform
-# XHS 管理台 — 小红书团队运营平台
+# XHS Dashboard
+
+**Internal operations platform for a Xiaohongshu (Little Red Book) content team.**
+**小红书团队运营管理平台。**
+
+Replaces spreadsheet-based workflows with a real-time dashboard covering content scheduling, multi-account monitoring, competitor research, and viral content analysis. Built for a content team running multiple overseas-student-targeted XHS accounts.
+
+替代原本零散的表格协作，将内容排期、多账号数据监控、竞品研究、爆款内容分析集中在一个实时看板。服务于运营多个海外留学生 IP 账号的内容团队。
 
 [English](#english) · [中文](#中文)
 
@@ -7,166 +13,277 @@
 
 ## English
 
-### Overview
+### Why this project
 
-An internal operations platform for a Xiaohongshu (Little Red Book) content team managing multiple overseas Chinese student accounts. Built to replace spreadsheets and manual tracking with a unified, real-time tool.
+Managing 5+ XHS accounts across multiple destinations (UK / US / Australia / Canada) quickly outgrows shared spreadsheets: content calendars drift, competitor data gets stale, and "which viral post did we reference last month?" becomes unanswerable. This platform gives the team a single surface for everything they do day-to-day, with all external data (follower counts, post metrics, competitor posts) refreshed automatically by a background crawler.
 
-The team runs several XHS accounts targeting Chinese students applying to universities in the UK, US, Australia, and Canada. This platform centralises everything the team needs: scheduling posts, monitoring account growth, researching competitors, and collecting viral content for inspiration.
+### Core features
 
-A background crawler service (running locally via macOS LaunchAgent) handles all data fetching automatically — team members simply use the web UI and results appear in real time.
+| Module | What it does |
+|--------|--------------|
+| **Accounts** | Stats per account, team-member assignments, historical follower trend |
+| **Content** | Post drafts with multi-image upload, 3-status kanban (draft → scheduled → published), full-screen detail drawer |
+| **Calendar** | Monthly grid view of all scheduled posts across accounts |
+| **Material Library** | Four tabs: viral posts collection, benchmark accounts (auto-fetched), topic bank, title/banned-word lists |
+| **Analytics** | Follower growth line charts, benchmark comparison, viral-post rankings by likes/saves/comments, country distribution |
 
-### Features
-
-**Account Management**
-- Track multiple XHS accounts with follower counts, engagement stats, and team member assignments
-- Per-account post history and performance overview
-
-**Content Management & Calendar**
-- Create and schedule posts with image uploads (stored in Supabase Storage)
-- Kanban-style status workflow: Draft → Scheduled → Published
-- Monthly calendar view with scheduling overview
-
-**Material Library**
-- **Viral posts** — save and annotate high-performing posts from XHS; crawler auto-fetches title, cover, full image carousel, caption, tags, and engagement metrics
-- **Benchmark accounts** — track competitor profiles; crawler fetches account info + 10 most recent posts with full details
-- **Topic bank** — curate content directions with reference links; crawler enriches with engagement data
-- **Title bank & banned words** — shared reference lists for the writing team
-
-**Analytics & Monitoring**
-- Follower growth trend charts for own accounts and benchmark accounts (daily snapshots)
-- Viral post rankings by likes / saves / comments
-- Country and topic distribution breakdowns
-
-### Architecture
+### System architecture
 
 ```
-Vercel (React frontend)
-    │
-    ├─ reads/writes ──→ Supabase (Postgres + Storage + Realtime)
-    │                       │
-    └─ sets fetch_status     │ polls every 5s for pending jobs
-       = "pending"           │
-                        macOS LaunchAgent
-                        (MediaCrawler + Playwright)
-                             │
-                        crawls XHS, uploads images
-                        to Supabase Storage, writes
-                        results back to DB
+           ┌─────────────────────────────────────────┐
+           │         Vercel (React + Vite)           │
+           │  — inline styles, Recharts for graphs   │
+           └──────────┬──────────────────────────────┘
+                      │ read / write / subscribe (Realtime)
+                      ▼
+           ┌─────────────────────────────────────────┐
+           │           Supabase                      │
+           │   Postgres + Storage + Realtime         │
+           │                                         │
+           │   Tables: posts, accounts, members,     │
+           │           benchmark_accounts,           │
+           │           viral_posts, topics,          │
+           │           account_stats_history,        │
+           │           benchmark_stats_history,      │
+           │           post_stats_history,           │
+           │           crawl_logs                    │
+           │   Bucket: post-images (public)          │
+           └──────────┬──────────────────────────────┘
+                      │ polls every 5 seconds
+                      ▼
+           ┌─────────────────────────────────────────┐
+           │   Local macOS machine (LaunchAgent)     │
+           │                                         │
+           │   server.py — MediaCrawler + Playwright │
+           │   • 5s poll: pending jobs → crawl       │
+           │   • 12h APScheduler: full sync          │
+           │   • Downloads & re-hosts XHS images     │
+           │     to Supabase Storage                 │
+           └─────────────────────────────────────────┘
 ```
 
-The crawler runs as a persistent background service on a local Mac. The frontend never calls XHS directly — it queues jobs in Supabase and subscribes to changes via Realtime, so any team member's browser updates automatically when a crawl completes.
+The frontend never talks to XHS directly. Instead, users enter a link → the frontend writes `fetch_status = 'pending'` to Supabase → the local crawler picks it up within 5 seconds → results stream back via Supabase Realtime so every team member's browser updates automatically without a refresh.
 
-### Tech Stack
+### Tech stack
 
-| Layer | Choice | Why |
-|-------|--------|-----|
-| Frontend | React + Vite (no router, no CSS framework) | Lightweight, fast iteration |
-| Database | Supabase (Postgres) | Realtime subscriptions, built-in Storage |
-| Crawler | MediaCrawler + Playwright | Handles XHS anti-bot measures |
-| Scheduler | APScheduler | 12-hour full sync, 5-second job polling |
-| Deployment | Vercel | Zero-config CI/CD from GitHub |
-| Auto-start | macOS LaunchAgent | Crawler restarts on login, auto-recovers from crashes |
+**Frontend** · React 18 · Vite 5 · Recharts · Lucide icons · `@supabase/supabase-js`
+No router (`useState` drives view switching), no CSS framework (inline styles only), no TypeScript — deliberate choices to keep the ~4,000 lines of JSX approachable for future non-frontend contributors.
 
-### Project Structure
+**Backend** · Supabase (Postgres, Storage, Realtime) with a single permissive RLS policy. Treated as the application's source of truth plus its job queue.
+
+**Crawler** · Python · [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) · Playwright (persistent browser context for cookie reuse) · APScheduler · httpx
+
+**Infra** · Vercel for zero-config CI from GitHub · macOS LaunchAgent for auto-start, auto-restart on crash, and throttled restart loops
+
+### Engineering challenges solved
+
+**1. Bypassing XHS's geographic API restrictions.**
+XHS blocks direct API calls from non-China IPs and from HTTPS pages hitting their HTTP-only CDN. Solution: a Supabase-backed job queue. The browser queues work, the local crawler (on a Mac in China with valid session cookies) processes it. All XHS traffic originates from an authenticated local machine — no CORS, no IP blocks, no auth tokens to ship to the client.
+
+**2. XHS CDN hotlink protection breaking every image.**
+XHS image URLs have a `Referer`-based hotlink policy and serve over HTTP only — both break when loaded from a Vercel-hosted HTTPS page. Solution: the crawler downloads every image with a fake `Referer` header, re-uploads to Supabase Storage, and writes the resulting public HTTPS URL back to the database. Every image rendered in the app is served from our own bucket.
+
+**3. Incomplete summary data from creator-feed endpoint.**
+When crawling a competitor's profile, XHS's feed endpoint only returns summary data — no captions, no tags, no comment counts. Solution: after fetching the feed, the crawler calls `get_note_by_id` per post to fill in the missing fields and build the full image carousel. Costs 10 extra requests per account but makes the detail drawer actually useful.
+
+**4. Building trend charts from scratch.**
+Supabase only stores current values by default, not history. Solution: two history tables (`account_stats_history`, `benchmark_stats_history`) with a `unique(id, date)` constraint, written via upsert from the 12-hour full-sync job. One row per entity per day, naturally idempotent across retries.
+
+**5. `xsec_token` and Chinese number parsing.**
+Creator IDs alone don't work against XHS's API — every request needs a time-limited `xsec_token` from the share URL. And XHS returns follower counts as `"1.2万"` / `"10万+"`, not integers. The crawler handles both in `parse_count()` and by requiring full share URLs in config.
+
+**6. Mobile-first responsive without a framework.**
+All responsive behavior routes through a single `useIsMobile()` hook at 768px. Modals stick to the bottom on mobile (`alignItems: flex-end`) and center on desktop. Drawers slide from right (desktop) or bottom (mobile, 92dvh height with safe-area padding). Zero media queries.
+
+### Project structure
 
 ```
-├── src/
-│   ├── App.jsx                  # Root layout, navigation, account/member state
-│   └── components/
-│       ├── AccountsPage.jsx     # Account list, stats, assignments
-│       ├── ContentManager.jsx   # Post grid, create/edit, image upload
-│       ├── CalendarPage.jsx     # Monthly calendar view
-│       ├── MaterialPage.jsx     # Viral posts, benchmarks, topics, titles
-│       ├── AnalyticsPage.jsx    # Trend charts, rankings
-│       ├── ViralPostDrawer.jsx  # Post detail drawer (image carousel, stats, download)
-│       ├── PostDetailDrawer.jsx # Internal post detail
-│       └── shared.jsx           # Hooks, atoms, constants
-├── crawler/
-│   ├── server.py                # Main crawler service (polling loop + full sync)
-│   ├── config.py                # Supabase credentials, account mapping
-│   ├── com.xhs.dashboard.crawler.plist  # macOS LaunchAgent definition
-│   └── setup_autostart.sh       # One-command autostart installer
-├── schema.sql                   # Core DB schema
-└── analytics_schema.sql         # Analytics history tables
+src/
+├── App.jsx                       # Layout, nav, account/member state
+└── components/
+    ├── AccountsPage.jsx          # Account list, per-account detail, stats
+    ├── ContentManager.jsx        # Post grid, create/edit modal, image upload
+    ├── CalendarPage.jsx          # Monthly calendar
+    ├── MaterialPage.jsx          # 4-tab library: viral / benchmark / topics / titles
+    ├── AnalyticsPage.jsx         # Trend charts, rankings, country breakdown
+    ├── ViralPostDrawer.jsx       # Viral / benchmark post detail (image carousel)
+    ├── PostDetailDrawer.jsx      # Internal post detail
+    └── shared.jsx                # useIsMobile, Avatar, Badge, STATUS, fmt()
+
+crawler/
+├── server.py                     # Long-running service: polling + APScheduler
+├── config.py                     # Supabase creds + ACCOUNT_MAP
+├── parser.py                     # parse_count() for Chinese number strings
+├── com.xhs.dashboard.crawler.plist  # LaunchAgent definition
+└── setup_autostart.sh            # One-shot installer for auto-start
+
+schema.sql                        # Core tables
+analytics_schema.sql              # History snapshot tables
+crawler/schema.sql                # Crawler-specific tables (stats history, crawl_logs)
 ```
 
-### Design Decisions
+### Local setup
 
-**No authentication layer** — this is a closed internal tool shared with 4–8 known team members. Adding login would add friction without meaningful security benefit for this use case.
+**Prerequisites** Node 18+ · Python 3.11+ · a working [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) checkout with a logged-in XHS session
 
-**Supabase as job queue** — XHS blocks direct API calls from non-Chinese IPs and from HTTPS pages calling HTTP endpoints. By having the frontend write `fetch_status = 'pending'` to Supabase and the local crawler poll for jobs, all XHS traffic originates from a local machine with valid session cookies, bypassing these restrictions entirely.
+```bash
+# 1. Frontend
+npm install
+cp .env.example .env        # fill VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+npm run dev                 # http://localhost:5173
 
-**Image re-hosting** — XHS CDN images use hotlink protection and HTTP-only URLs, both of which break when embedded in a Vercel-hosted page. The crawler downloads every image and re-uploads it to Supabase Storage, returning stable HTTPS public URLs.
+# 2. Database — paste each file into Supabase SQL Editor once
+#    schema.sql, analytics_schema.sql, crawler/schema.sql
 
-**No TypeScript, no CSS framework** — the entire UI uses inline styles with a single `useIsMobile()` hook for responsive breakpoints. Chosen deliberately to keep the codebase approachable for future contributors without a frontend background.
+# 3. Crawler service
+cd crawler
+# fill SUPABASE_URL, SUPABASE_KEY, ACCOUNT_MAP in config.py
+chmod +x setup_autostart.sh
+./setup_autostart.sh        # installs LaunchAgent, starts immediately
+tail -f logs/server.log     # verify "✅ XHS 客户端初始化成功"
+```
+
+### Design choices worth calling out
+
+- **No auth layer.** Known 4–8 user team, shared internal tool. Adding login is pure friction.
+- **Supabase Realtime instead of polling.** One subscription per relevant table; every connected browser reacts to crawler completions within milliseconds.
+- **UUID-first upload pattern.** `crypto.randomUUID()` generates post IDs client-side before insert, so images upload to `post-images/{post_id}/` paths before the row exists — avoids the classic "which comes first, the row or the storage path" ordering problem.
+- **Flexible JSONB columns for nested data.** `recent_posts` on `benchmark_accounts` is a JSONB array: adding fields (caption, tags, images) never required a migration.
 
 ---
 
 ## 中文
 
-### 项目简介
+### 项目背景
 
-小红书团队内部管理平台，供 4-8 名团队成员日常使用。团队运营多个面向海外留学申请群体（英美澳加）的小红书账号，本平台将内容排期、账号监控、竞品分析、素材管理整合在一个工具里，替代原有的表格协作方式。
+运营 5+ 个面向不同留学目的地（英美澳加）的小红书账号，共享表格很快就不够用了：排期会漂移，竞品数据会过时，"上个月我们参考的爆款帖是哪一篇"成了无法追溯的问题。这个平台把团队每天的工作集中到一个界面上，外部数据（粉丝数、帖子互动、竞品动态）全部由后台爬虫自动刷新。
 
-爬虫服务以 macOS LaunchAgent 形式在本地后台常驻运行，团队成员只需在网页上操作，数据会通过 Supabase Realtime 自动同步到所有人的界面。
+### 核心功能
 
-### 功能模块
-
-**账号管理**
-- 管理多个小红书账号，记录粉丝数、互动数据、负责人分配
-- 查看每个账号的发帖历史和数据概览
-
-**内容管理 & 内容日历**
-- 创建帖子草稿，上传图片（存储于 Supabase Storage），设置发布时间
-- 草稿 → 已排期 → 已发布 状态流转
-- 月视图日历，直观查看排期全貌
-
-**素材库**
-- **爆款收藏** — 保存高互动帖子，爬虫自动抓取标题、封面、完整图片、正文、标签、互动数据
-- **对标账号** — 跟踪竞品账号，自动获取账号信息及最近10条帖子完整内容
-- **选题库** — 记录内容方向，可关联参考帖子，爬虫自动回填互动数据
-- **标题库 & 违禁词** — 团队共用的写作参考库
-
-**数据监控**
-- 自有账号与对标账号粉丝增长趋势折线图（每日自动快照）
-- 爆款帖子按点赞/收藏/评论排行
-- 地区分布与标签分布分析
+| 模块 | 作用 |
+|------|------|
+| **账号管理** | 每个账号的数据概览、团队成员分工、粉丝历史趋势 |
+| **内容管理** | 帖子草稿，多图上传，三态看板（草稿 → 已排期 → 已发布），全屏详情抽屉 |
+| **内容日历** | 跨账号月视图，一眼看完所有排期 |
+| **素材库** | 四个 Tab：爆款收藏、对标账号（自动抓取）、选题库、标题库/违禁词 |
+| **数据监控** | 粉丝增长折线图、对标对比、爆款按点赞/收藏/评论排行、地区分布 |
 
 ### 系统架构
 
 ```
-Vercel（React 前端）
-    │
-    ├─ 读写 ──────────→ Supabase（Postgres + Storage + Realtime）
-    │                           │
-    └─ 写入 fetch_status         │ 每5秒轮询待处理任务
-       = "pending"              │
-                        macOS LaunchAgent
-                        （MediaCrawler + Playwright）
-                                │
-                        爬取小红书数据，图片上传至
-                        Supabase Storage，结果写回数据库
+           ┌─────────────────────────────────────────┐
+           │         Vercel（React + Vite）          │
+           │   纯 inline styles · Recharts 作图      │
+           └──────────┬──────────────────────────────┘
+                      │ 读写 / 订阅（Realtime）
+                      ▼
+           ┌─────────────────────────────────────────┐
+           │           Supabase                      │
+           │   Postgres + Storage + Realtime         │
+           │                                         │
+           │   表: posts, accounts, members,         │
+           │       benchmark_accounts, viral_posts,  │
+           │       topics, account_stats_history,    │
+           │       benchmark_stats_history,          │
+           │       post_stats_history, crawl_logs    │
+           │   Bucket: post-images（公开）           │
+           └──────────┬──────────────────────────────┘
+                      │ 每 5 秒轮询
+                      ▼
+           ┌─────────────────────────────────────────┐
+           │      本地 macOS（LaunchAgent）          │
+           │                                         │
+           │  server.py · MediaCrawler + Playwright │
+           │  • 5 秒轮询：pending 任务 → 爬取       │
+           │  • 12 小时定时全量同步                  │
+           │  • 图片下载并转存至 Supabase Storage   │
+           └─────────────────────────────────────────┘
 ```
 
-前端不直接请求小红书接口，而是将任务写入 Supabase 排队，本地爬虫轮询处理后将结果写回，前端通过 Realtime 订阅实时更新——所有人的界面同步刷新，无需手动刷新页面。
+前端不直接请求小红书。用户粘贴链接 → 前端将 `fetch_status = 'pending'` 写入 Supabase → 本地爬虫 5 秒内接手 → 结果通过 Supabase Realtime 实时推送回所有成员的浏览器，无需手动刷新。
 
-### 技术栈
+### 技术选型
 
-| 层级 | 选型 | 原因 |
-|------|------|------|
-| 前端 | React + Vite（无路由库、无 CSS 框架） | 轻量，迭代快 |
-| 数据库 | Supabase（Postgres） | Realtime 订阅、内置 Storage |
-| 爬虫 | MediaCrawler + Playwright | 应对小红书反爬机制 |
-| 定时任务 | APScheduler | 12小时全量同步，5秒轮询 |
-| 部署 | Vercel | GitHub 自动 CI/CD |
-| 自启动 | macOS LaunchAgent | 开机自动启动，崩溃自动重启 |
+**前端** · React 18 · Vite 5 · Recharts · Lucide icons · `@supabase/supabase-js`
+不使用路由库（`useState` 切换视图），不使用 CSS 框架（全 inline styles），不使用 TypeScript — 有意简化约 4,000 行 JSX，降低后续非前端背景成员的上手门槛。
 
-### 关键设计决策
+**后端** · Supabase（Postgres + Storage + Realtime），单一通用 RLS policy，同时作为数据存储和任务队列。
 
-**不做登录验证** — 纯内部工具，用户范围固定，加登录只会增加使用摩擦，不带来实质安全收益。
+**爬虫** · Python · [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) · Playwright（持久化浏览器上下文，复用登录态）· APScheduler · httpx
 
-**Supabase 作为任务队列** — 小红书屏蔽境外 IP 的直接 API 请求，也不允许 HTTPS 页面调用 HTTP 接口。通过前端写 `pending` 状态、本地爬虫轮询处理的方式，所有小红书流量都来自持有有效 Cookie 的本地机器，完全绕过限制。
+**基础设施** · Vercel 从 GitHub 自动 CI · macOS LaunchAgent 管理爬虫进程，支持开机自启、崩溃重启、限频防抖。
 
-**图片重新托管** — 小红书 CDN 有防盗链机制且只支持 HTTP，直接嵌入 Vercel 页面会失效。爬虫将每张图片下载后上传至 Supabase Storage，返回稳定的 HTTPS 公开链接。
+### 关键工程问题与解法
 
-**纯 inline styles，无 CSS 框架** — 全局只用一个 `useIsMobile()` hook 处理响应式，降低非前端背景成员的上手门槛。
+**1. 绕过小红书的地域 API 限制。**
+小红书屏蔽境外 IP 的直接请求，也禁止 HTTPS 页面访问其 HTTP-only 图片 CDN。解法：Supabase 作为任务队列，浏览器下发任务，本地爬虫（运行于境内、持有有效 Cookie 的 Mac）消费任务。所有小红书流量都来自已登录的本地机器——无 CORS、无 IP 封禁、无需把敏感 token 下发到前端。
+
+**2. 图片防盗链几乎让所有图加载失败。**
+小红书图片 URL 有 `Referer` 防盗链且只走 HTTP，在 Vercel 的 HTTPS 页面上都会挂。解法：爬虫带伪造 `Referer` 下载每张图，重新上传至 Supabase Storage，再把返回的 HTTPS 公开链接写回数据库。页面上所有图都托管在自己的 bucket 里。
+
+**3. 对标账号列表接口返回的数据不完整。**
+爬取竞品主页时，小红书的 feed 接口只返回摘要——没有正文、标签、评论数。解法：爬完 feed 后，对每条帖子再调一次 `get_note_by_id` 补全详情并收集完整图片组。每个账号多发 10 次请求，但详情抽屉里能看到真正有用的内容。
+
+**4. 趋势图需要历史数据，但 Supabase 只存当前值。**
+解法：新增两张历史表（`account_stats_history`、`benchmark_stats_history`），加 `unique(id, date)` 约束，由每 12 小时的全量同步 upsert 写入。每实体每天一行，天然幂等。
+
+**5. `xsec_token` 和中文数字解析。**
+光靠用户 ID 调不通接口——每个请求都需要分享链接里带的临时 `xsec_token`。而粉丝数又是 `"1.2万"` / `"10万+"` 这样的中文字符串，不是数字。`parse_count()` 统一处理中文/英文/带符号数字，config 要求填完整的分享 URL。
+
+**6. 响应式无框架实现。**
+所有断点判断走一个 `useIsMobile()` hook（768px）。Modal 在手机上贴底、桌面居中；抽屉在桌面从右滑入、手机从下滑入（92dvh + 安全区内边距）。零 media query。
+
+### 目录结构
+
+```
+src/
+├── App.jsx                       # 布局、导航、账号/成员状态
+└── components/
+    ├── AccountsPage.jsx          # 账号列表、详情、统计
+    ├── ContentManager.jsx        # 帖子网格、新建/编辑、图片上传
+    ├── CalendarPage.jsx          # 月视图日历
+    ├── MaterialPage.jsx          # 素材库：爆款/对标/选题/标题
+    ├── AnalyticsPage.jsx         # 趋势图、排行、地区分布
+    ├── ViralPostDrawer.jsx       # 爆款/对标帖子详情抽屉
+    ├── PostDetailDrawer.jsx      # 内部帖子详情
+    └── shared.jsx                # useIsMobile、Avatar、Badge、STATUS、fmt
+
+crawler/
+├── server.py                     # 常驻服务：轮询 + APScheduler
+├── config.py                     # Supabase 凭证 + ACCOUNT_MAP
+├── parser.py                     # 中文数字解析
+├── com.xhs.dashboard.crawler.plist  # LaunchAgent 定义
+└── setup_autostart.sh            # 一键安装开机自启
+
+schema.sql                        # 核心表
+analytics_schema.sql              # 历史快照表
+crawler/schema.sql                # 爬虫专用表（历史快照、爬取日志）
+```
+
+### 本地启动
+
+**前置** Node 18+ · Python 3.11+ · 已配置好登录态的 [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler)
+
+```bash
+# 1. 前端
+npm install
+cp .env.example .env        # 填入 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY
+npm run dev                 # http://localhost:5173
+
+# 2. 数据库 — 在 Supabase SQL Editor 中依次执行
+#    schema.sql · analytics_schema.sql · crawler/schema.sql
+
+# 3. 爬虫服务
+cd crawler
+# 在 config.py 中填入 SUPABASE_URL、SUPABASE_KEY、ACCOUNT_MAP
+chmod +x setup_autostart.sh
+./setup_autostart.sh        # 安装 LaunchAgent 并立即启动
+tail -f logs/server.log     # 看到 "✅ XHS 客户端初始化成功" 即可
+```
+
+### 值得一提的设计取舍
+
+- **不做登录。** 4–8 人内部小团队，成员已知，登录只会增加摩擦。
+- **Supabase Realtime 替代轮询。** 每个相关表订阅一次，爬虫写完结果所有在线成员的页面毫秒级同步。
+- **UUID-first 上传模式。** `crypto.randomUUID()` 在前端先生成 post ID，图片上传到 `post-images/{post_id}/` 后再 insert 记录——绕开"先有图还是先有行"的顺序问题。
+- **JSONB 字段承载嵌套数据。** `benchmark_accounts.recent_posts` 是 JSONB 数组，新增字段（caption、tags、images）无需数据库迁移。
