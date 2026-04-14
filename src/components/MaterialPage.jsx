@@ -68,7 +68,8 @@ function BenchmarkTab() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm]         = useState({ xhs_url: "", destination: "", content_type: "", note_direction: "", consumer_words: "" });
   const [saving, setSaving]     = useState(false);
-  const [expanded, setExpanded] = useState(null); // id of expanded account card
+  const [expandedAll, setExpandedAll] = useState({}); // accountId → bool (show all 10 posts)
+  const [selectedPost, setSelectedPost] = useState(null); // benchmark post for drawer
 
   useEffect(() => {
     load();
@@ -186,12 +187,16 @@ function BenchmarkTab() {
         </div>
       )}
 
+      {/* 帖子详情抽屉 */}
+      {selectedPost && <ViralPostDrawer post={selectedPost} onClose={() => setSelectedPost(null)} />}
+
       {/* 账号卡片列表 */}
       {rows.length === 0 ? <Empty text="暂无对标账号，点击「添加账号」并粘贴小红书链接" /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {rows.map(row => {
-            const isExpanded = expanded === row.id;
+            const isExpandedAll = !!expandedAll[row.id];
             const recentPosts = Array.isArray(row.recent_posts) ? row.recent_posts : [];
+            const visiblePosts = isExpandedAll ? recentPosts : recentPosts.slice(0, 5);
 
             return (
               <div key={row.id} style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 12, overflow: "hidden" }}>
@@ -240,14 +245,6 @@ function BenchmarkTab() {
 
                   {/* 操作 */}
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
-                    {recentPosts.length > 0 && (
-                      <button onClick={() => setExpanded(isExpanded ? null : row.id)} style={{
-                        fontSize: 11, color: "#666", background: "none", border: "1px solid #2a2a2a",
-                        borderRadius: 6, padding: "4px 10px", cursor: "pointer",
-                      }}>
-                        {isExpanded ? "收起" : `查看 ${recentPosts.length} 条帖子`}
-                      </button>
-                    )}
                     {row.xhs_url && (
                       <a href={row.xhs_url} target="_blank" rel="noopener noreferrer" style={{ color: "#555", display: "flex", alignItems: "center" }}>
                         <ExternalLink size={13} />
@@ -261,19 +258,31 @@ function BenchmarkTab() {
                   </div>
                 </div>
 
-                {/* 最近帖子网格 */}
-                {isExpanded && recentPosts.length > 0 && (
+                {/* 最近帖子网格 — 默认显示5条，可展开全部 */}
+                {row.fetch_status === "done" && recentPosts.length > 0 && (
                   <div style={{ borderTop: "1px solid #1a1a1a", padding: "12px 18px" }}>
-                    <div style={{ fontSize: 11, color: "#444", marginBottom: 10, fontWeight: 500 }}>最近 {recentPosts.length} 条帖子</div>
+                    <div style={{ fontSize: 11, color: "#444", marginBottom: 10, fontWeight: 500 }}>最近帖子</div>
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(5, 1fr)", gap: 8 }}>
-                      {recentPosts.map((p, i) => (
-                        <a
+                      {visiblePosts.map((p, i) => (
+                        <div
                           key={i}
-                          href={p.note_id ? `https://www.xiaohongshu.com/explore/${p.note_id}` : "#"}
-                          target="_blank" rel="noopener noreferrer"
-                          style={{ textDecoration: "none", display: "block" }}
+                          onClick={() => setSelectedPost({
+                            images: p.cover_image ? [p.cover_image] : [],
+                            cover_image: p.cover_image,
+                            title: p.title,
+                            likes: p.likes,
+                            saves: p.saves,
+                            comments: p.comments,
+                            views: p.views,
+                            url: p.note_id ? `https://www.xiaohongshu.com/explore/${p.note_id}` : null,
+                            xhs_note_id: p.note_id,
+                            author_name: row.name,
+                            tags: p.tags || [],
+                            caption: p.caption || "",
+                          })}
+                          style={{ display: "block", cursor: "pointer" }}
                         >
-                          <div style={{ aspectRatio: "3/4", borderRadius: 8, overflow: "hidden", background: "#1a1a1a", position: "relative", cursor: "pointer" }}>
+                          <div style={{ aspectRatio: "3/4", borderRadius: 8, overflow: "hidden", background: "#1a1a1a", position: "relative" }}>
                             {p.cover_image ? (
                               <img src={p.cover_image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                             ) : (
@@ -291,9 +300,19 @@ function BenchmarkTab() {
                               )}
                             </div>
                           </div>
-                        </a>
+                        </div>
                       ))}
                     </div>
+                    {recentPosts.length > 5 && (
+                      <button
+                        onClick={() => setExpandedAll(p => ({ ...p, [row.id]: !p[row.id] }))}
+                        style={{ marginTop: 10, width: "100%", padding: "8px 0", background: "transparent", border: "1px solid #2a2a2a", borderRadius: 8, color: "#555", fontSize: 12, cursor: "pointer" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#aaa"}
+                        onMouseLeave={e => e.currentTarget.style.color = "#555"}
+                      >
+                        {isExpandedAll ? "收起" : `查看全部 ${recentPosts.length} 条帖子`}
+                      </button>
+                    )}
                   </div>
                 )}
 
