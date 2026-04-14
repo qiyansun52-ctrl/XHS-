@@ -137,10 +137,10 @@ npm run dev                 # http://localhost:5173
 
 # 3. Crawler service
 cd crawler
-# fill SUPABASE_URL, SUPABASE_KEY, ACCOUNT_MAP in config.py
+cp config.example.py config.py   # fill SUPABASE_URL, SUPABASE_KEY, ACCOUNT_MAP
 chmod +x setup_autostart.sh
-./setup_autostart.sh        # installs LaunchAgent, starts immediately
-tail -f logs/server.log     # verify "✅ XHS 客户端初始化成功"
+./setup_autostart.sh             # installs LaunchAgent, starts immediately
+tail -f logs/server.log          # verify "✅ XHS 客户端初始化成功"
 ```
 
 ### Design choices worth calling out
@@ -275,10 +275,10 @@ npm run dev                 # http://localhost:5173
 
 # 3. 爬虫服务
 cd crawler
-# 在 config.py 中填入 SUPABASE_URL、SUPABASE_KEY、ACCOUNT_MAP
+cp config.example.py config.py   # 填入 SUPABASE_URL、SUPABASE_KEY、ACCOUNT_MAP
 chmod +x setup_autostart.sh
-./setup_autostart.sh        # 安装 LaunchAgent 并立即启动
-tail -f logs/server.log     # 看到 "✅ XHS 客户端初始化成功" 即可
+./setup_autostart.sh             # 安装 LaunchAgent 并立即启动
+tail -f logs/server.log          # 看到 "✅ XHS 客户端初始化成功" 即可
 ```
 
 ### 值得一提的设计取舍

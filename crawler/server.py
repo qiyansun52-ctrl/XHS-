@@ -52,9 +52,9 @@ from media_platform.xhs.help import parse_note_info_from_note_url, parse_creator
 from tools.utils import utils
 import config as mc_config  # MediaCrawler config
 
-# ── Supabase ──────────────────────────────────────────────────────────
-SUPABASE_URL = "https://nlsgqlkqimedgftkmzxn.supabase.co"
-SUPABASE_KEY = "sb_publishable_tyupNEK3brVkdIUFkYl8Lw_glvGpbbb"
+# ── Supabase（从 crawler/config.py 读取凭证，该文件已 gitignore）──
+sys.path.insert(0, CRAWLER_DIR)
+from config import SUPABASE_URL, SUPABASE_KEY  # noqa: E402
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ── 全局状态 ──────────────────────────────────────────────────────────
