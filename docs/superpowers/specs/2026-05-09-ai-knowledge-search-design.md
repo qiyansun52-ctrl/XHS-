@@ -41,6 +41,8 @@ The page uses a mixed answer format:
 - The answer then expands into recommendations, citations, image analysis, and saved-note actions.
 - Users can continue asking follow-up questions in the same context.
 
+Follow-up context should stay lightweight in the first version. The frontend can send the latest answer summary, the latest citations, and the new user question back to `POST /ai/research`. Do not add a persistent chat-thread table yet. Saved `ai_research_notes` records are durable research outputs, not full chat transcripts.
+
 The page should not be a Material Library tab. It is a new product capability that can later grow into a broader content copilot.
 
 ## Agent Behavior
@@ -82,6 +84,7 @@ First-version indexed sources:
 - `titles`: title text and any available metadata.
 - `banned_words`: used for risk reminders, not as primary search results.
 - `posts`: team historical posts, titles, captions, tags, scheduled/published status, images, account, uploader, and performance data if available.
+- `post_stats` and `post_stats_history`: likes, saves, comments, views, shares, and collection time for ranking team historical content by performance.
 - `accounts`: account name, avatar, country/flag, bio, color, and positioning context.
 
 Documents such as SOPs, retrospectives, and operating notes are out of scope for this first version. They can become a second knowledge source later.
@@ -97,6 +100,10 @@ Each indexed item should include:
 - `id`
 - `source_type`: `viral_post`, `benchmark_post`, `topic`, `title`, `team_post`, or similar.
 - `source_id`
+- `source_key`: stable text key unique within a source type.
+- `parent_source_type`: optional parent type for nested records.
+- `parent_source_id`: optional parent id for nested records.
+- `source_url`
 - `title`
 - `content`
 - `summary`
@@ -107,10 +114,22 @@ Each indexed item should include:
 - `image_urls`
 - `embedding`
 - `embed_status`
+- `source_updated_at`
+- `content_hash`
+- `last_indexed_at`
 - `created_at`
 - `updated_at`
 
 The original business tables remain the source of truth. `knowledge_items` is an AI index that can be rebuilt.
+
+Sync rules:
+
+- Enforce a uniqueness constraint on `(source_type, source_key)`.
+- Upsert index rows by `source_type` and `source_key`, not by generated `id`.
+- Re-embed an item when `content_hash` changes.
+- Use `source_updated_at` and `last_indexed_at` to skip unchanged rows.
+- Remove or mark stale index rows when the original source no longer exists.
+- Split `benchmark_accounts.recent_posts` into one `knowledge_items` row per recent post. For those rows, `source_type` should be `benchmark_post`, `source_key` should combine the benchmark account id with `note_id` or a stable array position, and `parent_source_id` should point back to the benchmark account. Citations should be able to open the parent account and identify the specific referenced post.
 
 ## Retrieval Strategy
 
@@ -138,7 +157,7 @@ First-version image support should use VLM-to-text analysis, not image vector se
 
 When a user uploads an image:
 
-1. Upload the image to Supabase Storage.
+1. Upload the image to Supabase Storage under a dedicated AI research namespace, such as `post-images/ai-research/{research_id}/{filename}`. If a separate bucket is later preferred, use `ai-query-images`; do not mix AI query uploads into formal post image paths.
 2. Send the image URL to the AI API.
 3. Ask the VLM to produce structured image signals:
    - subject
