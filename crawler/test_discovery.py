@@ -28,6 +28,15 @@ class DiscoveryHelperTests(unittest.TestCase):
         self.assertIn("英国留学 申请焦虑", queries)
         self.assertTrue(all(len(query) <= 24 for query in queries))
 
+    def test_derive_search_queries_returns_empty_when_max_queries_is_zero(self):
+        self.assertEqual(
+            derive_search_queries(
+                question="英国申请焦虑方向有什么爆款素材？",
+                max_queries=0,
+            ),
+            [],
+        )
+
     def test_score_candidate_weights_saves_more_than_likes(self):
         low_save = {"likes": 10000, "saves": 50, "comments": 10, "views": 50000}
         high_save = {"likes": 2000, "saves": 1200, "comments": 10, "views": 8000}
@@ -43,6 +52,11 @@ class DiscoveryHelperTests(unittest.TestCase):
             score_candidate(row, relevance_score=0.5, source_path="keyword_search"),
         )
 
+    def test_score_candidate_defaults_invalid_relevance_score_safely(self):
+        row = {"likes": 1000, "saves": 300, "comments": 50, "views": 10000}
+        self.assertIsInstance(score_candidate(row, relevance_score=None), float)
+        self.assertIsInstance(score_candidate(row, relevance_score="not-a-number"), float)
+
     def test_candidate_dedupe_prefers_note_id(self):
         row = {"xhs_note_id": "note-1", "url": "https://example.com/a"}
         self.assertEqual(candidate_dedupe_key(row), "note:note-1")
@@ -50,6 +64,14 @@ class DiscoveryHelperTests(unittest.TestCase):
     def test_candidate_dedupe_falls_back_to_url(self):
         row = {"xhs_note_id": "", "url": "https://example.com/a?x=1"}
         self.assertEqual(candidate_dedupe_key(row), "url:https://example.com/a?x=1")
+
+    def test_candidate_dedupe_strips_tracking_query_and_fragment_noise(self):
+        noisy = {
+            "xhs_note_id": "",
+            "url": "https://example.com/a?xsec_token=1&utm_source=x#frag",
+        }
+        clean = {"xhs_note_id": "", "url": "https://example.com/a"}
+        self.assertEqual(candidate_dedupe_key(noisy), candidate_dedupe_key(clean))
 
     def test_build_candidate_url_uses_note_id(self):
         self.assertEqual(
@@ -69,6 +91,29 @@ class DiscoveryHelperTests(unittest.TestCase):
         self.assertEqual(cleaned["recommendations"][0]["candidate_ids"], ["c1"])
         self.assertEqual(len(cleaned["recommendations"]), 1)
         self.assertEqual(cleaned["general_advice"][0]["text"], "没有候选支持")
+
+    def test_validate_external_candidate_ids_handles_nullable_and_string_fields(self):
+        payload = {
+            "recommendations": [
+                {"text": "空候选", "candidate_ids": None},
+                {"text": "字符串候选", "candidate_ids": "c1"},
+            ],
+            "general_advice": [],
+            "candidate_references": "c1",
+        }
+        cleaned = validate_external_candidate_ids(payload, allowed_candidate_ids={"c1"})
+        self.assertEqual(cleaned["recommendations"], [{"text": "字符串候选", "candidate_ids": ["c1"]}])
+        self.assertEqual(cleaned["general_advice"][0]["text"], "空候选")
+        self.assertEqual(cleaned["candidate_references"], ["c1"])
+
+    def test_validate_external_candidate_ids_converts_nullable_references_to_empty_list(self):
+        payload = {
+            "recommendations": [],
+            "general_advice": [],
+            "candidate_references": None,
+        }
+        cleaned = validate_external_candidate_ids(payload, allowed_candidate_ids={"c1"})
+        self.assertEqual(cleaned["candidate_references"], [])
 
 
 if __name__ == "__main__":

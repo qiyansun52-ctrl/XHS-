@@ -3,11 +3,14 @@ from __future__ import annotations
 import math
 import re
 from typing import Any, Dict, Iterable, List, Sequence, Set
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 COUNTRY_HINTS = ("英国", "美国", "澳洲", "澳大利亚", "加拿大", "香港", "新加坡")
 CONTENT_HINTS = ("申请", "文书", "选校", "签证", "雅思", "托福", "offer", "留学", "焦虑")
 MOOD_HINTS = ("焦虑", "崩溃", "后悔", "避坑", "真实", "省钱", "经验", "攻略")
+TRACKING_QUERY_PREFIXES = ("utm_",)
+TRACKING_QUERY_PARAMS = {"xsec_token", "spm", "from", "share_from_user_hidden", "type"}
 
 
 def normalize_question(question: str) -> str:
@@ -27,6 +30,9 @@ def derive_search_queries(
     weak_titles: Sequence[str] | None = None,
     max_queries: int = 4,
 ) -> List[str]:
+    if max_queries <= 0:
+        return []
+
     text = normalize_question(" ".join([
         question or "",
         " ".join(image_keywords or []),
@@ -70,10 +76,18 @@ def _log_norm(value: Any) -> float:
     return math.log1p(number) / math.log1p(100000)
 
 
+def _safe_relevance_score(value: Any, default: float = 0.5) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(min(number, 1.0), 0.0)
+
+
 def score_candidate(row: Dict[str, Any], relevance_score: float = 0.5, source_path: str = "keyword_search") -> float:
     trust_boost = 1.0 if source_path == "benchmark_expansion" else 0.0
     score = (
-        max(min(float(relevance_score), 1.0), 0.0) * 0.45
+        _safe_relevance_score(relevance_score) * 0.45
         + _log_norm(row.get("saves")) * 0.25
         + _log_norm(row.get("comments")) * 0.12
         + _log_norm(row.get("likes")) * 0.10
@@ -83,17 +97,45 @@ def score_candidate(row: Dict[str, Any], relevance_score: float = 0.5, source_pa
     return round(score, 6)
 
 
+def _is_tracking_query_param(name: str) -> bool:
+    return name in TRACKING_QUERY_PARAMS or any(name.startswith(prefix) for prefix in TRACKING_QUERY_PREFIXES)
+
+
+def _normalize_candidate_url(url: str) -> str:
+    if not url:
+        return ""
+
+    parsed = urlsplit(url.strip())
+    query_params = [
+        (name, value)
+        for name, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not _is_tracking_query_param(name)
+    ]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query_params), ""))
+
+
 def candidate_dedupe_key(row: Dict[str, Any]) -> str:
     note_id = str(row.get("xhs_note_id") or row.get("note_id") or "").strip()
     if note_id:
         return f"note:{note_id}"
-    return f"url:{str(row.get('url') or '').strip()}"
+    return f"url:{_normalize_candidate_url(str(row.get('url') or ''))}"
 
 
 def build_candidate_url(note_id: str | None, fallback_url: str | None = None) -> str:
     if note_id:
         return f"https://www.xiaohongshu.com/explore/{note_id}"
     return fallback_url or ""
+
+
+def _as_candidate_id_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    try:
+        return [str(item) for item in value]
+    except TypeError:
+        return [str(value)]
 
 
 def validate_external_candidate_ids(answer: dict, allowed_candidate_ids: Iterable[str]) -> dict:
@@ -105,7 +147,7 @@ def validate_external_candidate_ids(answer: dict, allowed_candidate_ids: Iterabl
     for recommendation in cleaned.get("recommendations") or []:
         candidate_ids = [
             str(candidate_id)
-            for candidate_id in recommendation.get("candidate_ids", [])
+            for candidate_id in _as_candidate_id_list(recommendation.get("candidate_ids"))
             if str(candidate_id) in allowed
         ]
         if candidate_ids:
@@ -122,7 +164,7 @@ def validate_external_candidate_ids(answer: dict, allowed_candidate_ids: Iterabl
     cleaned["general_advice"] = general_advice
     cleaned["candidate_references"] = [
         candidate_id
-        for candidate_id in cleaned.get("candidate_references", [])
+        for candidate_id in _as_candidate_id_list(cleaned.get("candidate_references"))
         if str(candidate_id) in allowed
     ]
     return cleaned
