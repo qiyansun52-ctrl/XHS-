@@ -16,7 +16,7 @@ import research_service
 import discovery_service
 from ai_api import CreateDiscoveryJobReq, ReviewCandidateReq
 from discovery_service import DiscoveryService
-from research_models import ResearchAnswer
+from research_models import ResearchAnswer, ResearchRequest
 from research_service import model_to_dict
 
 
@@ -46,6 +46,14 @@ class FakeTable:
 
     def eq(self, column, value):
         self.calls.append(("eq", column, value))
+        return self
+
+    def in_(self, column, values):
+        self.calls.append(("in_", column, values))
+        return self
+
+    def or_(self, clauses):
+        self.calls.append(("or_", clauses))
         return self
 
     def single(self):
@@ -736,6 +744,127 @@ class ExternalSupplementTests(unittest.TestCase):
         self.assertEqual(answer.conclusion, "本次外部发现没有找到可用候选素材。")
         self.assertEqual(answer.recommendations, [])
         self.assertEqual(answer.candidate_references, [])
+
+
+class ResearchReferenceTests(unittest.TestCase):
+    def test_fallback_answer_only_references_top_recommendations(self):
+        service = research_service.ResearchService(None, None)
+        rows = [
+            {"id": f"row-{index}", "source_type": "viral_post", "title": f"素材 {index}"}
+            for index in range(5)
+        ]
+
+        answer = service.generate_fallback_answer(
+            question="英国春天标题素材",
+            task_type="material",
+            rows=rows,
+            sparse=False,
+            image_analysis=None,
+        )
+
+        self.assertEqual(answer["material_references"], ["row-0", "row-1", "row-2"])
+
+    def test_fallback_answer_prefers_topic_evidence_over_broad_country_matches(self):
+        service = research_service.ResearchService(None, None)
+        rows = [
+            {
+                "id": "row-0",
+                "source_type": "viral_post",
+                "title": "2025还敢来英国留学！叫你狠人",
+                "content": "关于英国留学，滤镜早该碎了。",
+            },
+            {
+                "id": "row-1",
+                "source_type": "viral_post",
+                "title": "🇬🇧散步伦敦｜Spring in Richmond",
+                "content": "社区网球场边的樱花开了，在公园里分享野餐。",
+            },
+            {
+                "id": "row-2",
+                "source_type": "viral_post",
+                "title": "🇬🇧 用live打开伦敦的春天",
+                "content": "用live感受伦敦春日鲜活的生命力，看小狗在花瓣堆里打滚。",
+            },
+            {
+                "id": "row-3",
+                "source_type": "viral_post",
+                "title": "考研后逆袭英国名校？当然来得及",
+                "content": "考研出分才申英国也可以准备。",
+            },
+        ]
+
+        answer = service.generate_fallback_answer(
+            question="帮我找一下有关于英国春天的标题素材",
+            task_type="material",
+            rows=rows,
+            sparse=False,
+            image_analysis=None,
+        )
+
+        self.assertEqual(answer["material_references"], ["row-2", "row-1"])
+        self.assertEqual(
+            [item["source_ids"][0] for item in answer["recommendations"]],
+            ["row-2", "row-1"],
+        )
+
+    def test_research_cited_sources_follow_recommendation_ids_not_all_material_refs(self):
+        rows = [
+            {
+                "id": f"row-{index}",
+                "source_type": "viral_post",
+                "source_key": f"row-{index}",
+                "title": f"素材 {index}",
+                "content": f"英国春天内容 {index}",
+                "similarity": 0.9,
+            }
+            for index in range(5)
+        ]
+
+        class NarrowReferenceService(research_service.ResearchService):
+            async def retrieve(self, query, task_type):
+                return rows
+
+            async def generate_answer(self, question, task_type, rows, sparse, image_analysis):
+                return {
+                    "conclusion": "只引用推荐中真正用到的素材。",
+                    "recommendations": [
+                        {"text": "参考前两条春天素材。", "source_ids": ["row-0", "row-1"]},
+                    ],
+                    "material_references": [f"row-{index}" for index in range(5)],
+                    "team_history_references": [],
+                    "image_analysis": None,
+                    "general_advice": [],
+                }
+
+        service = NarrowReferenceService(None, None)
+
+        answer = asyncio.run(service.research(ResearchRequest(question="英国春天标题素材")))
+
+        self.assertEqual(answer.material_references, ["row-0", "row-1"])
+        self.assertEqual([source.id for source in answer.cited_sources], ["row-0", "row-1"])
+        self.assertEqual(len(answer.related_sources), 5)
+
+    def test_keyword_candidates_filters_prompt_scaffold_tokens(self):
+        sb = FakeSupabase({"knowledge_items": []})
+        service = research_service.ResearchService(sb, None)
+
+        service.keyword_candidates(
+            "帮我找一下有关于英国春天的标题素材",
+            source_types=["viral_post"],
+        )
+
+        or_call = [
+            call for table in sb.tables
+            for call in table.calls
+            if call[0] == "or_"
+        ][0]
+        clauses = or_call[1]
+
+        self.assertIn("英国", clauses)
+        self.assertIn("春天", clauses)
+        self.assertNotIn("帮我", clauses)
+        self.assertNotIn("标题", clauses)
+        self.assertNotIn("素材", clauses)
 
 
 class DiscoveryHelperTests(unittest.TestCase):

@@ -39,6 +39,58 @@ EXTERNAL_DISCOVERY_ENABLED = _config_value("EXTERNAL_DISCOVERY_ENABLED", False)
 EXTERNAL_DISCOVERY_TRIGGER_MODE = _config_value("EXTERNAL_DISCOVERY_TRIGGER_MODE", "ask_first")
 EXTERNAL_DISCOVERY_MAX_QUERIES = _config_value("EXTERNAL_DISCOVERY_MAX_QUERIES", 4)
 
+GENERIC_QUERY_TOKENS = {
+    "帮我",
+    "我找",
+    "找一",
+    "一下",
+    "下有",
+    "有关",
+    "关于",
+    "标题",
+    "素材",
+    "内容",
+    "方向",
+    "参考",
+    "相关",
+}
+
+GENERIC_QUERY_PHRASES = (
+    "帮我找一下",
+    "帮我",
+    "找一下",
+    "有关于",
+    "有没有",
+    "有关",
+    "关于",
+    "标题素材",
+    "标题",
+    "素材",
+    "内容",
+    "方向",
+    "参考",
+    "相关",
+    "一下",
+    "的",
+)
+
+COUNTRY_QUERY_TOKENS = (
+    "英国",
+    "美国",
+    "澳洲",
+    "澳大利亚",
+    "加拿大",
+    "新加坡",
+    "香港",
+)
+
+EVIDENCE_TOKEN_SYNONYMS = {
+    "春天": ("春天", "春日", "春季", "spring", "樱花", "花瓣"),
+    "夏天": ("夏天", "夏日", "夏季", "summer"),
+    "秋天": ("秋天", "秋日", "秋季", "autumn", "fall"),
+    "冬天": ("冬天", "冬日", "冬季", "winter"),
+}
+
 
 def model_to_dict(model) -> Dict[str, Any]:
     if hasattr(model, "model_dump"):
@@ -106,11 +158,30 @@ class ResearchService:
 
         validated = validate_citations(answer_payload, retrieved_ids={str(row["id"]) for row in retrieved_rows})
         sources = [KnowledgeSource(**self._source_shape(row)) for row in retrieved_rows]
-        cited_ids = set()
+        recommended_ids: List[str] = []
         for recommendation in validated.get("recommendations", []) or []:
-            cited_ids.update(recommendation.get("source_ids") or [])
-        cited_ids.update(validated.get("material_references", []) or [])
-        cited_ids.update(validated.get("team_history_references", []) or [])
+            for source_id in recommendation.get("source_ids") or []:
+                source_id = str(source_id)
+                if source_id not in recommended_ids:
+                    recommended_ids.append(source_id)
+
+        if recommended_ids:
+            cited_ids = set(recommended_ids)
+            material_references = self._reference_ids_for_types(
+                retrieved_rows,
+                cited_ids,
+                {"viral_post", "benchmark_post", "topic", "title"},
+            )
+            team_history_references = self._reference_ids_for_types(
+                retrieved_rows,
+                cited_ids,
+                {"team_post"},
+            )
+        else:
+            material_references = validated.get("material_references", []) or []
+            team_history_references = validated.get("team_history_references", []) or []
+            cited_ids = set(material_references + team_history_references)
+
         cited_sources = [source for source in sources if source.id in cited_ids]
         weak_titles = [
             str(row.get("title") or "")
@@ -135,8 +206,8 @@ class ResearchService:
             task_type=task_type,
             conclusion=validated["conclusion"],
             recommendations=validated.get("recommendations", []),
-            material_references=validated.get("material_references", []),
-            team_history_references=validated.get("team_history_references", []),
+            material_references=material_references,
+            team_history_references=team_history_references,
             related_sources=sources,
             cited_sources=cited_sources,
             image_analysis=image_analysis,
@@ -166,7 +237,7 @@ class ResearchService:
         return merged[:20]
 
     def keyword_candidates(self, query: str, source_types: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        tokens = tokenize_query(query)
+        tokens = self._keyword_tokens(query)
         if not tokens:
             return []
 
@@ -180,6 +251,19 @@ class ResearchService:
             clauses.append(f"content.ilike.%{token}%")
         res = query_builder.or_(",".join(clauses)).execute()
         return res.data or []
+
+    def _keyword_tokens(self, query: str) -> List[str]:
+        cleaned = str(query or "")
+        for phrase in GENERIC_QUERY_PHRASES:
+            cleaned = cleaned.replace(phrase, " ")
+
+        tokens = []
+        for token in tokenize_query(cleaned):
+            if token in GENERIC_QUERY_TOKENS or len(token) < 2:
+                continue
+            if token not in tokens:
+                tokens.append(token)
+        return tokens
 
     def _rerank_for_task(self, rows: List[Dict[str, Any]], task_type: str) -> List[Dict[str, Any]]:
         def relevance(row: Dict[str, Any]) -> float:
@@ -421,7 +505,7 @@ class ResearchService:
                 "general_advice": [],
             }
 
-        top = rows[:3]
+        top = self._top_evidence_rows(question, rows, max_count=3)
         recommendations = [
             {"text": f"优先参考《{row.get('title') or '无标题'}》的内容角度。", "source_ids": [str(row["id"])]}
             for row in top
@@ -431,12 +515,12 @@ class ResearchService:
             "recommendations": recommendations,
             "material_references": [
                 str(row["id"])
-                for row in rows
+                for row in top
                 if row.get("source_type") in ("viral_post", "benchmark_post", "topic", "title")
             ],
             "team_history_references": [
                 str(row["id"])
-                for row in rows
+                for row in top
                 if row.get("source_type") == "team_post"
             ],
             "image_analysis": model_to_dict(image_analysis) if image_analysis else None,
@@ -576,6 +660,76 @@ class ResearchService:
             "team_post",
             "account",
         ]
+
+    def _reference_ids_for_types(
+        self,
+        rows: List[Dict[str, Any]],
+        cited_ids: set,
+        source_types: set,
+    ) -> List[str]:
+        return [
+            str(row["id"])
+            for row in rows
+            if str(row.get("id")) in cited_ids and row.get("source_type") in source_types
+        ]
+
+    def _top_evidence_rows(
+        self,
+        question: str,
+        rows: List[Dict[str, Any]],
+        max_count: int = 3,
+    ) -> List[Dict[str, Any]]:
+        evidence_tokens = self._evidence_tokens(question)
+        if not evidence_tokens:
+            return rows[:max_count]
+
+        scored = []
+        for index, row in enumerate(rows):
+            title = str(row.get("title") or "").lower()
+            content = str(row.get("content") or "").lower()
+            score = 0
+            for token in evidence_tokens:
+                variants = EVIDENCE_TOKEN_SYNONYMS.get(token, (token,))
+                for variant in variants:
+                    normalized = variant.lower()
+                    if normalized in title:
+                        score += 3
+                    elif normalized in content:
+                        score += 1
+            if score:
+                scored.append((score, index, row))
+
+        if not scored:
+            return rows[:max_count]
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [row for _, _, row in scored[:max_count]]
+
+    def _evidence_tokens(self, question: str) -> List[str]:
+        cleaned = str(question or "").lower()
+        for phrase in GENERIC_QUERY_PHRASES:
+            cleaned = cleaned.replace(phrase, " ")
+
+        country_tokens = [token for token in COUNTRY_QUERY_TOKENS if token in cleaned]
+        topic_text = cleaned
+        for token in country_tokens:
+            topic_text = topic_text.replace(token, " ")
+
+        topic_tokens = self._clean_evidence_tokens(tokenize_query(topic_text, max_tokens=16))
+        if topic_tokens:
+            return topic_tokens
+        if country_tokens:
+            return country_tokens
+        return self._clean_evidence_tokens(tokenize_query(cleaned, max_tokens=16))
+
+    def _clean_evidence_tokens(self, tokens: List[str]) -> List[str]:
+        cleaned: List[str] = []
+        for token in tokens:
+            if token in GENERIC_QUERY_TOKENS or len(token) < 2:
+                continue
+            if token not in cleaned:
+                cleaned.append(token)
+        return cleaned
 
     def _source_shape(self, row: Dict[str, Any]) -> Dict[str, Any]:
         return {
