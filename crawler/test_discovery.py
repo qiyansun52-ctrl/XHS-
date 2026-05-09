@@ -1,7 +1,9 @@
+import asyncio
 import math
 import unittest
 from types import SimpleNamespace
 
+import ai_api
 from discovery import (
     build_candidate_url,
     candidate_dedupe_key,
@@ -11,6 +13,8 @@ from discovery import (
     validate_external_candidate_ids,
 )
 import research_service
+import discovery_service
+from ai_api import CreateDiscoveryJobReq, ReviewCandidateReq
 from discovery_service import DiscoveryService
 from research_models import ResearchAnswer
 from research_service import model_to_dict
@@ -60,6 +64,8 @@ class FakeTable:
         if self.insert_payload is not None:
             return FakeResult(self.insert_payload)
         if self.update_payload is not None:
+            if self.name in self.client.update_responses:
+                return FakeResult(self.client.update_responses[self.name])
             return FakeResult([self.update_payload])
         return FakeResult(self.client.responses.get(self.name, []))
 
@@ -67,6 +73,7 @@ class FakeTable:
 class FakeSupabase:
     def __init__(self, responses=None):
         self.responses = responses or {}
+        self.update_responses = {}
         self.tables = []
 
     def table(self, name):
@@ -96,6 +103,20 @@ class DiscoveryServiceTests(unittest.TestCase):
         self.assertEqual(sb.tables[0].name, "external_discovery_jobs")
         self.assertEqual(sb.tables[0].insert_payload[0]["created_by_member_id"], "member-1")
 
+    def test_create_job_preserves_explicit_empty_search_queries(self):
+        sb = FakeSupabase()
+        service = DiscoveryService(sb, max_queries=2)
+
+        job = service.create_job(
+            user_question="英国申请焦虑方向有什么爆款素材？",
+            task_type="material",
+            trigger_reason="user_requested",
+            internal_answer_payload={"conclusion": "内部资料不足"},
+            search_queries=[],
+        )
+
+        self.assertEqual(job["search_queries"], [])
+
     def test_get_job_with_candidates_orders_candidates_by_score_desc(self):
         sb = FakeSupabase({
             "external_discovery_jobs": {"id": "job-1", "status": "pending"},
@@ -109,6 +130,18 @@ class DiscoveryServiceTests(unittest.TestCase):
         self.assertEqual(result["candidates"], [{"id": "candidate-1", "candidate_score": 0.8}])
         self.assertIn(("order", "candidate_score", True), sb.tables[1].calls)
 
+    def test_get_job_with_candidates_raises_when_job_is_missing(self):
+        sb = FakeSupabase({
+            "external_discovery_jobs": None,
+            "external_discovery_candidates": [],
+        })
+        service = DiscoveryService(sb)
+
+        with self.assertRaises(discovery_service.DiscoveryNotFoundError) as ctx:
+            service.get_job_with_candidates("missing-job")
+
+        self.assertEqual(str(ctx.exception), "外部发现任务不存在")
+
     def test_mark_candidate_review_writes_status_reason_and_reviewed_at(self):
         sb = FakeSupabase()
         service = DiscoveryService(sb)
@@ -119,6 +152,84 @@ class DiscoveryServiceTests(unittest.TestCase):
         self.assertEqual(candidate["review_reason"], "不相关")
         self.assertIn("reviewed_at", candidate)
         self.assertIn(("eq", "id", "candidate-1"), sb.tables[0].calls)
+        self.assertIn(("eq", "review_status", "pending"), sb.tables[0].calls)
+
+    def test_mark_candidate_review_raises_when_no_pending_row_is_updated(self):
+        sb = FakeSupabase()
+        sb.update_responses["external_discovery_candidates"] = []
+        service = DiscoveryService(sb)
+
+        with self.assertRaises(discovery_service.DiscoveryNotFoundError) as ctx:
+            service.mark_candidate_review("candidate-1", "ignored")
+
+        self.assertEqual(str(ctx.exception), "候选素材不存在或已审核")
+
+    def test_create_discovery_job_req_validates_enum_fields(self):
+        with self.assertRaises(ValueError):
+            CreateDiscoveryJobReq(
+                user_question="帮我找素材",
+                task_type="invalid",
+                trigger_reason="user_requested",
+            )
+        with self.assertRaises(ValueError):
+            CreateDiscoveryJobReq(
+                user_question="帮我找素材",
+                task_type="mixed",
+                trigger_reason="invalid",
+            )
+
+    def test_review_candidate_req_validates_optional_reason_enum(self):
+        self.assertIsNone(ReviewCandidateReq().reason)
+        self.assertEqual(ReviewCandidateReq(reason="低质量").reason, "低质量")
+        with self.assertRaises(ValueError):
+            ReviewCandidateReq(reason="随便写的原因")
+
+
+class DiscoveryApiTests(unittest.TestCase):
+    def setUp(self):
+        self.original_discovery_service = ai_api.discovery_service
+
+    def tearDown(self):
+        ai_api.discovery_service = self.original_discovery_service
+
+    def test_get_discovery_job_translates_missing_job_to_404(self):
+        class MissingJobService:
+            def get_job_with_candidates(self, job_id):
+                raise discovery_service.DiscoveryNotFoundError("外部发现任务不存在")
+
+        ai_api.discovery_service = MissingJobService()
+
+        with self.assertRaises(ai_api.HTTPException) as ctx:
+            asyncio.run(ai_api.get_discovery_job("missing-job"))
+
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(ctx.exception.detail, "外部发现任务不存在")
+
+    def test_ignore_discovery_candidate_translates_finalized_candidate_to_404(self):
+        class FinalizedCandidateService:
+            def mark_candidate_review(self, candidate_id, review_status, review_reason=None):
+                raise discovery_service.DiscoveryNotFoundError("候选素材不存在或已审核")
+
+        ai_api.discovery_service = FinalizedCandidateService()
+
+        with self.assertRaises(ai_api.HTTPException) as ctx:
+            asyncio.run(ai_api.ignore_discovery_candidate("candidate-1"))
+
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(ctx.exception.detail, "候选素材不存在或已审核")
+
+    def test_reject_discovery_candidate_translates_finalized_candidate_to_404(self):
+        class FinalizedCandidateService:
+            def mark_candidate_review(self, candidate_id, review_status, review_reason=None):
+                raise discovery_service.DiscoveryNotFoundError("候选素材不存在或已审核")
+
+        ai_api.discovery_service = FinalizedCandidateService()
+
+        with self.assertRaises(ai_api.HTTPException) as ctx:
+            asyncio.run(ai_api.reject_discovery_candidate("candidate-1", ReviewCandidateReq(reason="不相关")))
+
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.assertEqual(ctx.exception.detail, "候选素材不存在或已审核")
 
 
 class DiscoveryHelperTests(unittest.TestCase):

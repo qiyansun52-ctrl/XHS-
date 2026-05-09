@@ -10,6 +10,10 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class DiscoveryNotFoundError(Exception):
+    pass
+
+
 class DiscoveryService:
     def __init__(self, supabase_client, max_queries: int = 4):
         self.sb = supabase_client
@@ -25,7 +29,11 @@ class DiscoveryService:
         benchmark_account_ids: Optional[List[str]] = None,
         created_by_member_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        queries = search_queries or derive_search_queries(user_question, max_queries=self.max_queries)
+        queries = (
+            derive_search_queries(user_question, max_queries=self.max_queries)
+            if search_queries is None
+            else search_queries
+        )
         payload = {
             "user_question": user_question,
             "task_type": task_type,
@@ -48,6 +56,8 @@ class DiscoveryService:
             .single()
             .execute()
         )
+        if not job_res.data:
+            raise DiscoveryNotFoundError("外部发现任务不存在")
         candidate_res = (
             self.sb.table("external_discovery_candidates")
             .select("*")
@@ -75,7 +85,10 @@ class DiscoveryService:
             self.sb.table("external_discovery_candidates")
             .update(payload)
             .eq("id", candidate_id)
+            .eq("review_status", "pending")
             .execute()
         )
         rows = res.data or []
-        return rows[0] if rows else payload
+        if not rows:
+            raise DiscoveryNotFoundError("候选素材不存在或已审核")
+        return rows[0]

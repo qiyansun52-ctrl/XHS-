@@ -21,7 +21,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 # ── 路径配置（让 from config import 能找到 crawler/config.py）──
 CRAWLER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
 import voyageai
-from discovery_service import DiscoveryService
+from discovery_service import DiscoveryNotFoundError, DiscoveryService
 from research_models import ResearchRequest
 from research_service import ResearchService
 
@@ -404,16 +404,16 @@ class SearchViralReq(BaseModel):
 
 class CreateDiscoveryJobReq(BaseModel):
     user_question: str = Field(..., min_length=1, max_length=1000)
-    task_type: str = Field(default="mixed")
-    trigger_reason: str = Field(default="user_requested")
+    task_type: Literal["material", "experience", "image_reference", "mixed"] = Field(default="mixed")
+    trigger_reason: Literal["sparse_recall", "zero_recall", "user_requested"] = Field(default="user_requested")
     internal_answer_payload: Dict[str, Any] = Field(default_factory=dict)
-    search_queries: List[str] = Field(default_factory=list)
+    search_queries: Optional[List[str]] = None
     benchmark_account_ids: List[str] = Field(default_factory=list)
     created_by_member_id: Optional[str] = None
 
 
 class ReviewCandidateReq(BaseModel):
-    reason: Optional[str] = None
+    reason: Optional[Literal["不相关", "低质量", "疑似广告", "重复素材", "不适合团队调性", "数据异常"]] = None
 
 
 @app.post("/ai/search-viral", dependencies=[Depends(require_api_key)])
@@ -492,6 +492,8 @@ async def create_discovery_job(req: CreateDiscoveryJobReq):
 async def get_discovery_job(job_id: str):
     try:
         return discovery_service.get_job_with_candidates(job_id)
+    except DiscoveryNotFoundError as e:
+        raise HTTPException(404, str(e))
     except Exception as e:
         log.error(f"读取外部发现任务失败: {e}")
         raise HTTPException(500, "读取外部发现任务失败，请稍后重试。")
@@ -502,6 +504,8 @@ async def ignore_discovery_candidate(candidate_id: str):
     try:
         candidate = discovery_service.mark_candidate_review(candidate_id, "ignored")
         return {"ok": True, "candidate": candidate}
+    except DiscoveryNotFoundError as e:
+        raise HTTPException(404, str(e))
     except Exception as e:
         log.error(f"忽略候选素材失败: {e}")
         raise HTTPException(500, "操作失败，请稍后重试。")
@@ -512,6 +516,8 @@ async def reject_discovery_candidate(candidate_id: str, req: ReviewCandidateReq)
     try:
         candidate = discovery_service.mark_candidate_review(candidate_id, "rejected", req.reason or "不相关")
         return {"ok": True, "candidate": candidate}
+    except DiscoveryNotFoundError as e:
+        raise HTTPException(404, str(e))
     except Exception as e:
         log.error(f"拒绝候选素材失败: {e}")
         raise HTTPException(500, "操作失败，请稍后重试。")
