@@ -95,6 +95,22 @@ class FakeSearchClient:
         }
 
 
+class FakeKeywordClient:
+    async def get_note_by_keyword(self, keyword, page=1, page_size=10, sort=None):
+        self.assert_sort(sort)
+        return {
+            "items": [
+                {"note_id": "n2", "display_title": keyword, "xsec_token": "token2"}
+            ]
+        }
+
+    def assert_sort(self, sort):
+        if not hasattr(sort, "value"):
+            raise AttributeError("sort must expose value")
+        if sort.value not in ("popularity_descending", "general"):
+            raise AssertionError(f"unexpected sort value: {sort.value}")
+
+
 class XhsDiscoveryAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_adapter_uses_available_search_method(self):
         from xhs_discovery import search_keyword_notes
@@ -102,6 +118,13 @@ class XhsDiscoveryAdapterTests(unittest.IsolatedAsyncioTestCase):
         rows = await search_keyword_notes(FakeSearchClient(), "英国留学", limit=5)
         self.assertEqual(rows[0]["note_id"], "n1")
         self.assertEqual(rows[0]["display_title"], "英国留学")
+
+    async def test_search_adapter_passes_sort_object_to_keyword_method(self):
+        from xhs_discovery import search_keyword_notes
+
+        rows = await search_keyword_notes(FakeKeywordClient(), "美国申请", limit=5)
+        self.assertEqual(rows[0]["note_id"], "n2")
+        self.assertEqual(rows[0]["display_title"], "美国申请")
 
 
 class DiscoveryServiceTests(unittest.TestCase):

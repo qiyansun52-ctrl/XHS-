@@ -4,6 +4,11 @@ import asyncio
 from typing import Any, Dict, List
 
 
+class _SearchSort:
+    def __init__(self, value: str):
+        self.value = value
+
+
 async def _maybe_await(value):
     if hasattr(value, "__await__"):
         return await value
@@ -34,9 +39,19 @@ async def search_keyword_notes(client, keyword: str, limit: int = 20) -> List[Di
         if not method:
             continue
         try:
-            payload = await _maybe_await(method(keyword=keyword, page=1, page_size=limit, sort="popularity_descending"))
-        except TypeError:
-            payload = await _maybe_await(method(keyword, 1, limit))
+            payload = await _maybe_await(
+                method(
+                    keyword=keyword,
+                    page=1,
+                    page_size=limit,
+                    sort=_SearchSort("popularity_descending"),
+                )
+            )
+        except (TypeError, AttributeError):
+            try:
+                payload = await _maybe_await(method(keyword=keyword, page=1, page_size=limit))
+            except TypeError:
+                payload = await _maybe_await(method(keyword, 1, limit))
         return _extract_items(payload)[:limit]
 
     raise RuntimeError("当前 MediaCrawler 客户端不支持关键词搜索，请先补充 XHS 搜索适配器。")

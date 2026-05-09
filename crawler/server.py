@@ -587,20 +587,24 @@ async def process_external_discovery_jobs():
                     if stored_count >= EXTERNAL_DISCOVERY_MAX_CANDIDATES:
                         break
 
-                benchmark_rows = (
-                    sb.table("benchmark_accounts")
-                    .select("*")
-                    .eq("fetch_status", "done")
-                    .execute()
-                    .data or []
-                )
-                selected_accounts = select_benchmark_accounts(
-                    benchmark_rows,
-                    job.get("search_queries") or [],
-                    max_accounts=EXTERNAL_DISCOVERY_MAX_BENCHMARK_ACCOUNTS,
-                )
+                selected_accounts = []
+                if stored_count < EXTERNAL_DISCOVERY_MAX_CANDIDATES:
+                    benchmark_rows = (
+                        sb.table("benchmark_accounts")
+                        .select("*")
+                        .eq("fetch_status", "done")
+                        .execute()
+                        .data or []
+                    )
+                    selected_accounts = select_benchmark_accounts(
+                        benchmark_rows,
+                        job.get("search_queries") or [],
+                        max_accounts=EXTERNAL_DISCOVERY_MAX_BENCHMARK_ACCOUNTS,
+                    )
                 for account in selected_accounts:
                     for post in (account.get("recent_posts") or [])[:EXTERNAL_DISCOVERY_MAX_POSTS_PER_BENCHMARK]:
+                        if stored_count >= EXTERNAL_DISCOVERY_MAX_CANDIDATES:
+                            break
                         note_id = post.get("note_id") or post.get("id")
                         url = build_candidate_url(note_id, post.get("url"))
                         dedupe = candidate_dedupe_key({"xhs_note_id": note_id, "url": url})
