@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bot, Bookmark, Image as ImageIcon, Loader2, Send, Sparkles } from "lucide-react";
 import { supabase } from "../supabase.js";
-import { research, saveResearchNote } from "../aiApi.js";
+import {
+  createDiscoveryJob,
+  getDiscoveryJob,
+  ignoreDiscoveryCandidate,
+  rejectDiscoveryCandidate,
+  research,
+  saveResearchNote,
+} from "../aiApi.js";
 import { inputStyle, useIsMobile } from "./shared.jsx";
 
 const SOURCE_TYPE_LABELS = {
@@ -60,6 +67,114 @@ function SectionCard({ title, children }) {
       <div style={{ fontSize: 11, color: "#555", marginBottom: 10 }}>{title}</div>
       {children}
     </section>
+  );
+}
+
+function DiscoveryCandidateCard({ candidate, onReview }) {
+  const statusLabel = {
+    pending: "待处理",
+    ignored: "已忽略",
+    rejected: "已拒绝",
+    approved: "已采纳",
+  }[candidate.status] || candidate.status || "待处理";
+  const isReviewed = ["ignored", "rejected", "approved"].includes(candidate.status);
+
+  return (
+    <div style={{
+      background: "#0d0d0d",
+      border: "1px solid #222",
+      borderRadius: 10,
+      padding: 14,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#e0e0e0", lineHeight: 1.45 }}>
+            {candidate.title || candidate.account_name || "未命名候选素材"}
+          </div>
+          <div style={{ fontSize: 11, color: "#555", marginTop: 5 }}>
+            {candidate.platform || "外部来源"} · 相关度 {candidate.relevance_score ?? "-"}
+          </div>
+        </div>
+        <span style={{
+          flexShrink: 0,
+          fontSize: 10,
+          color: isReviewed ? "#666" : "#FF9F43",
+          background: isReviewed ? "#151515" : "rgba(255,159,67,0.08)",
+          border: `1px solid ${isReviewed ? "#242424" : "rgba(255,159,67,0.18)"}`,
+          borderRadius: 999,
+          padding: "3px 8px",
+        }}>
+          {statusLabel}
+        </span>
+      </div>
+
+      <div style={{
+        fontSize: 12,
+        color: "#888",
+        lineHeight: 1.65,
+        display: "-webkit-box",
+        WebkitLineClamp: 3,
+        WebkitBoxOrient: "vertical",
+        overflow: "hidden",
+      }}>
+        {candidate.summary || candidate.description || candidate.reason || "暂无摘要，建议打开原始链接人工判断。"}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: "#444" }}>
+        {candidate.likes_count != null && <span>赞 {candidate.likes_count}</span>}
+        {candidate.saves_count != null && <span>藏 {candidate.saves_count}</span>}
+        {candidate.comments_count != null && <span>评 {candidate.comments_count}</span>}
+        {candidate.author_name && <span>{candidate.author_name}</span>}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {candidate.source_url && (
+          <a
+            href={candidate.source_url}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 12, color: "#54A0FF", textDecoration: "none", marginRight: "auto" }}
+          >
+            打开外部链接
+          </a>
+        )}
+        <button
+          type="button"
+          disabled={isReviewed}
+          onClick={() => onReview(candidate, "ignore")}
+          style={{
+            padding: "7px 10px",
+            borderRadius: 8,
+            border: "1px solid #2a2a2a",
+            background: "transparent",
+            color: isReviewed ? "#444" : "#aaa",
+            cursor: isReviewed ? "not-allowed" : "pointer",
+            fontSize: 12,
+          }}
+        >
+          忽略
+        </button>
+        <button
+          type="button"
+          disabled={isReviewed}
+          onClick={() => onReview(candidate, "reject")}
+          style={{
+            padding: "7px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(255,36,66,0.25)",
+            background: "rgba(255,36,66,0.06)",
+            color: isReviewed ? "#444" : "#FF2442",
+            cursor: isReviewed ? "not-allowed" : "pointer",
+            fontSize: 12,
+          }}
+        >
+          不相关
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -195,6 +310,10 @@ export default function AISearchPage() {
   const [loading, setLoading] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [error, setError] = useState("");
+  const [discoveryJob, setDiscoveryJob] = useState(null);
+  const [discoveryCandidates, setDiscoveryCandidates] = useState([]);
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState("");
 
   const uploadImage = async () => {
     if (!imageFile) return null;
@@ -227,10 +346,55 @@ export default function AISearchPage() {
         previousCitationIds: answer?.cited_sources?.map(source => source.id) || [],
       });
       setAnswer(result);
+      setDiscoveryJob(null);
+      setDiscoveryCandidates([]);
+      setDiscoveryError("");
     } catch (err) {
       setError(err.message || "AI 服务暂时不可用，请稍后再试。");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshDiscoveryJob = async (jobId) => {
+    const payload = await getDiscoveryJob(jobId);
+    setDiscoveryJob(payload.job);
+    setDiscoveryCandidates(payload.candidates || []);
+    return payload.job;
+  };
+
+  const handleCreateDiscovery = async () => {
+    if (!answer) return;
+
+    setDiscoveryLoading(true);
+    setDiscoveryError("");
+    try {
+      const { job } = await createDiscoveryJob({
+        user_question: answer.question,
+        task_type: answer.task_type || "mixed",
+        trigger_reason: answer.discovery_trigger_reason || "user_requested",
+        internal_answer_payload: answer,
+        search_queries: answer.suggested_search_queries || [],
+        benchmark_account_ids: [],
+      });
+      setDiscoveryJob(job);
+      setDiscoveryCandidates([]);
+    } catch (err) {
+      setDiscoveryError(err.message || "创建外部发现任务失败，请稍后重试。");
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  };
+
+  const handleCandidateReview = async (candidate, action) => {
+    try {
+      const resp = action === "ignore"
+        ? await ignoreDiscoveryCandidate(candidate.id)
+        : await rejectDiscoveryCandidate(candidate.id, "不相关");
+      const updated = resp.candidate;
+      setDiscoveryCandidates(prev => prev.map(item => item.id === candidate.id ? { ...item, ...updated } : item));
+    } catch (err) {
+      alert(err.message || "操作失败，请稍后重试。");
     }
   };
 
@@ -257,6 +421,26 @@ export default function AISearchPage() {
       setSavingNote(false);
     }
   };
+
+  useEffect(() => {
+    if (!discoveryJob?.id || !["pending", "running"].includes(discoveryJob.status)) return;
+
+    const timer = window.setInterval(() => {
+      refreshDiscoveryJob(discoveryJob.id).catch(err => {
+        setDiscoveryError(err.message || "刷新外部发现任务失败");
+      });
+    }, 5000);
+
+    return () => window.clearInterval(timer);
+  }, [discoveryJob?.id, discoveryJob?.status]);
+
+  const canCreateDiscovery = answer?.can_external_discover || answer?.suggested_search_queries?.length > 0;
+  const discoveryStatusText = {
+    pending: "等待开始",
+    running: "正在发现",
+    completed: "已完成",
+    failed: "失败",
+  }[discoveryJob?.status] || discoveryJob?.status;
 
   return (
     <div style={{ padding: isMobile ? 16 : 32, maxWidth: 1220, margin: isMobile ? 0 : "0 auto" }}>
@@ -374,6 +558,132 @@ export default function AISearchPage() {
       )}
 
       <AnswerView answer={answer} onSave={handleSave} savingNote={savingNote} isMobile={isMobile} />
+
+      {answer && canCreateDiscovery && (
+        <section style={{
+          marginTop: 18,
+          background: "linear-gradient(180deg, rgba(84,160,255,0.07), rgba(17,17,17,1) 42%)",
+          border: "1px solid #1e1e1e",
+          borderRadius: 12,
+          padding: 16,
+        }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 14,
+            alignItems: isMobile ? "stretch" : "center",
+            flexDirection: isMobile ? "column" : "row",
+          }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 6 }}>继续发现外部素材</div>
+              <div style={{ fontSize: 12, color: "#777", lineHeight: 1.65 }}>
+                内部知识库已经回答完毕，可以基于本次问题继续创建外部发现任务，补充新的对标账号或内容线索。
+              </div>
+              {answer.suggested_search_queries?.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                  {answer.suggested_search_queries.map(query => (
+                    <span key={query} style={{
+                      fontSize: 10,
+                      color: "#54A0FF",
+                      background: "rgba(84,160,255,0.08)",
+                      border: "1px solid rgba(84,160,255,0.18)",
+                      borderRadius: 999,
+                      padding: "3px 8px",
+                    }}>
+                      {query}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleCreateDiscovery}
+              disabled={discoveryLoading || ["pending", "running"].includes(discoveryJob?.status)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "10px 14px",
+                borderRadius: 8,
+                border: "none",
+                background: discoveryLoading || ["pending", "running"].includes(discoveryJob?.status) ? "#333" : "#FF2442",
+                color: "#fff",
+                cursor: discoveryLoading || ["pending", "running"].includes(discoveryJob?.status) ? "not-allowed" : "pointer",
+                fontSize: 13,
+                fontWeight: 700,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {discoveryLoading ? <Loader2 size={15} /> : <Sparkles size={15} />}
+              {discoveryJob ? "重新发现" : "创建发现任务"}
+            </button>
+          </div>
+
+          {discoveryError && (
+            <div style={{
+              marginTop: 14,
+              background: "rgba(255,36,66,0.08)",
+              border: "1px solid rgba(255,36,66,0.2)",
+              color: "#FF2442",
+              borderRadius: 10,
+              padding: 12,
+              fontSize: 13,
+            }}>
+              {discoveryError}
+            </div>
+          )}
+
+          {discoveryJob && (
+            <div style={{
+              marginTop: 14,
+              background: "#0d0d0d",
+              border: "1px solid #222",
+              borderRadius: 10,
+              padding: 12,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}>
+              <div style={{ fontSize: 12, color: "#aaa" }}>
+                任务状态：<span style={{ color: "#fff" }}>{discoveryStatusText}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => refreshDiscoveryJob(discoveryJob.id).catch(err => {
+                  setDiscoveryError(err.message || "刷新外部发现任务失败");
+                })}
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #2a2a2a",
+                  background: "transparent",
+                  color: "#aaa",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                手动刷新
+              </button>
+            </div>
+          )}
+
+          {discoveryCandidates.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 14 }}>
+              {discoveryCandidates.map(candidate => (
+                <DiscoveryCandidateCard
+                  key={candidate.id}
+                  candidate={candidate}
+                  onReview={handleCandidateReview}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

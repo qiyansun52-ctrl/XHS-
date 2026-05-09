@@ -41,3 +41,39 @@ export async function research(question, options = {}) {
 export async function saveResearchNote(payload) {
   return postJson("/ai/research-notes", payload);
 }
+
+export async function createDiscoveryJob(payload) {
+  return postJson("/ai/discovery-jobs", payload);
+}
+
+export async function getDiscoveryJob(jobId) {
+  if (!BASE_URL || !API_KEY) {
+    throw new Error("AI API 未配置，请检查 .env 中的 VITE_AI_API_URL 和 VITE_AI_API_KEY");
+  }
+
+  const resp = await fetch(`${BASE_URL}/ai/discovery-jobs/${jobId}`, {
+    method: "GET",
+    headers: { "X-API-Key": API_KEY },
+  });
+
+  if (!resp.ok) {
+    let message = "";
+    try {
+      const data = await resp.json();
+      message = data?.detail || data?.message || "";
+    } catch {
+      message = await resp.text().catch(() => "");
+    }
+    throw new Error(message || "读取外部发现任务失败，请稍后重试。");
+  }
+
+  return resp.json();
+}
+
+export async function ignoreDiscoveryCandidate(candidateId) {
+  return postJson(`/ai/discovery-candidates/${candidateId}/ignore`, {});
+}
+
+export async function rejectDiscoveryCandidate(candidateId, reason = "不相关") {
+  return postJson(`/ai/discovery-candidates/${candidateId}/reject`, { reason });
+}
