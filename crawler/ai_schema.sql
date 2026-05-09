@@ -30,6 +30,8 @@ where embedding is null
 
 -- ── 检索 RPC 函数 ────────────────────────────────────────────────
 -- Supabase 客户端通过 sb.rpc('search_viral_posts', ...) 调用
+drop function if exists search_viral_posts(vector, int);
+
 create or replace function search_viral_posts(
     query_embedding vector(512),
     top_k int default 10
@@ -39,8 +41,8 @@ returns table (
     title text,
     caption text,
     cover_image text,
-    images text[],
-    tags text[],
+    images jsonb,
+    tags jsonb,
     author_name text,
     likes int,
     saves int,
@@ -55,8 +57,8 @@ language sql stable as $$
         v.title,
         v.caption,
         v.cover_image,
-        v.images,
-        v.tags,
+        to_jsonb(v.images) as images,
+        to_jsonb(v.tags) as tags,
         v.author_name,
         v.likes,
         v.saves,
