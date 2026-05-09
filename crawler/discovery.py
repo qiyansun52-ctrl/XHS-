@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from typing import Any, Dict, Iterable, List, Sequence, Set
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -10,7 +11,7 @@ COUNTRY_HINTS = ("英国", "美国", "澳洲", "澳大利亚", "加拿大", "香
 CONTENT_HINTS = ("申请", "文书", "选校", "签证", "雅思", "托福", "offer", "留学", "焦虑")
 MOOD_HINTS = ("焦虑", "崩溃", "后悔", "避坑", "真实", "省钱", "经验", "攻略")
 TRACKING_QUERY_PREFIXES = ("utm_",)
-TRACKING_QUERY_PARAMS = {"xsec_token", "spm", "from", "share_from_user_hidden", "type"}
+TRACKING_QUERY_PARAMS = {"xsec_token", "spm", "share_from_user_hidden"}
 
 
 def normalize_question(question: str) -> str:
@@ -81,6 +82,8 @@ def _safe_relevance_score(value: Any, default: float = 0.5) -> float:
         number = float(value)
     except (TypeError, ValueError):
         number = default
+    if not math.isfinite(number):
+        number = default
     return max(min(number, 1.0), 0.0)
 
 
@@ -132,6 +135,8 @@ def _as_candidate_id_list(value: Any) -> List[str]:
         return []
     if isinstance(value, str):
         return [value]
+    if isinstance(value, Mapping):
+        return []
     try:
         return [str(item) for item in value]
     except TypeError:
