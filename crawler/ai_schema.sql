@@ -259,6 +259,7 @@ create table if not exists external_discovery_jobs (
   started_at timestamptz,
   finished_at timestamptz,
   created_at timestamptz default now(),
+  -- Application code updates this during job status transitions.
   updated_at timestamptz default now()
 );
 
@@ -269,6 +270,7 @@ create index if not exists idx_external_discovery_jobs_created_at
   on external_discovery_jobs(created_at desc);
 
 alter table external_discovery_jobs enable row level security;
+drop policy if exists "team_access" on external_discovery_jobs;
 create policy "team_access" on external_discovery_jobs for all using (true) with check (true);
 
 create table if not exists external_discovery_candidates (
@@ -295,7 +297,7 @@ create table if not exists external_discovery_candidates (
   review_reason text check (
     review_reason is null or review_reason in ('不相关', '低质量', '疑似广告', '重复素材', '不适合团队调性', '数据异常')
   ),
-  approved_viral_post_id uuid,
+  approved_viral_post_id uuid references viral_posts(id) on delete set null,
   created_at timestamptz default now(),
   reviewed_at timestamptz,
   unique(job_id, url)
@@ -312,6 +314,7 @@ create index if not exists idx_external_discovery_candidates_note_id
   where xhs_note_id is not null;
 
 alter table external_discovery_candidates enable row level security;
+drop policy if exists "team_access" on external_discovery_candidates;
 create policy "team_access" on external_discovery_candidates for all using (true) with check (true);
 
 alter table ai_research_notes
