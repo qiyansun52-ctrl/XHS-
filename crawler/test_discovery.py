@@ -38,6 +38,16 @@ class DiscoveryHelperTests(unittest.TestCase):
             [],
         )
 
+    def test_query_derivation_uses_image_keywords(self):
+        queries = derive_search_queries(
+            question="帮我找相似参考",
+            image_keywords=["英国", "申请", "焦虑"],
+            weak_titles=[],
+            max_queries=3,
+        )
+        self.assertTrue(any("英国" in query for query in queries))
+        self.assertTrue(any("申请" in query for query in queries))
+
     def test_score_candidate_weights_saves_more_than_likes(self):
         low_save = {"likes": 10000, "saves": 50, "comments": 10, "views": 50000}
         high_save = {"likes": 2000, "saves": 1200, "comments": 10, "views": 8000}

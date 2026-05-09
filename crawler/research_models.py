@@ -65,4 +65,9 @@ class ResearchAnswer(BaseModel):
     image_analysis: Optional[ImageAnalysis] = None
     general_advice: List[GeneralAdvice] = Field(default_factory=list)
     sparse: bool = False
+    can_external_discover: bool = False
+    discovery_trigger_reason: Optional[str] = None
+    suggested_search_queries: List[str] = Field(default_factory=list)
+    discovery_trigger_mode: str = "ask_first"
+    discovery_job_id: Optional[str] = None
     message: Optional[str] = None

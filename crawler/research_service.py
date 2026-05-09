@@ -11,6 +11,7 @@ except Exception:
     OpenAI = None
 
 from research_models import ImageAnalysis, KnowledgeSource, ResearchAnswer, ResearchRequest
+from discovery import derive_search_queries
 from retrieval import (
     detect_task_type,
     is_sparse_result,
@@ -26,6 +27,9 @@ try:
         OPENAI_VISION_MODEL,
         AI_RESEARCH_MIN_RESULTS,
         AI_RESEARCH_MIN_SIMILARITY,
+        EXTERNAL_DISCOVERY_ENABLED,
+        EXTERNAL_DISCOVERY_TRIGGER_MODE,
+        EXTERNAL_DISCOVERY_MAX_QUERIES,
     )
 except Exception:
     OPENAI_API_KEY = ""
@@ -33,6 +37,9 @@ except Exception:
     OPENAI_VISION_MODEL = "gpt-4.1-mini"
     AI_RESEARCH_MIN_RESULTS = 3
     AI_RESEARCH_MIN_SIMILARITY = 0.55
+    EXTERNAL_DISCOVERY_ENABLED = False
+    EXTERNAL_DISCOVERY_TRIGGER_MODE = "ask_first"
+    EXTERNAL_DISCOVERY_MAX_QUERIES = 4
 
 
 def model_to_dict(model) -> Dict[str, Any]:
@@ -107,6 +114,18 @@ class ResearchService:
         cited_ids.update(validated.get("material_references", []) or [])
         cited_ids.update(validated.get("team_history_references", []) or [])
         cited_sources = [source for source in sources if source.id in cited_ids]
+        weak_titles = [
+            str(row.get("title") or "")
+            for row in retrieved_rows[:5]
+            if row.get("title")
+        ]
+        suggested_search_queries = derive_search_queries(
+            req.question,
+            image_keywords=image_analysis.keywords if image_analysis else [],
+            weak_titles=weak_titles,
+            max_queries=EXTERNAL_DISCOVERY_MAX_QUERIES,
+        ) if sparse and EXTERNAL_DISCOVERY_ENABLED else []
+        discovery_trigger_reason = "zero_recall" if sparse and not retrieved_rows else "sparse_recall"
 
         return ResearchAnswer(
             question=req.question,
@@ -120,6 +139,11 @@ class ResearchService:
             image_analysis=image_analysis,
             general_advice=validated.get("general_advice", []),
             sparse=sparse,
+            can_external_discover=bool(sparse and EXTERNAL_DISCOVERY_ENABLED),
+            discovery_trigger_reason=discovery_trigger_reason if sparse and EXTERNAL_DISCOVERY_ENABLED else None,
+            suggested_search_queries=suggested_search_queries,
+            discovery_trigger_mode=EXTERNAL_DISCOVERY_TRIGGER_MODE,
+            discovery_job_id=None,
             message=" ".join(messages) if messages else None,
         )
 
