@@ -24,7 +24,8 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 # ── 路径配置 ─────────────────────────────────────────────────────────
-MEDIACRAWLER_DIR = os.getenv("MEDIACRAWLER_DIR", "/Users/gabriel/MediaCrawler")
+DEFAULT_MEDIACRAWLER_DIR = os.path.join(os.path.expanduser("~"), "MediaCrawler")
+MEDIACRAWLER_DIR = os.getenv("MEDIACRAWLER_DIR", DEFAULT_MEDIACRAWLER_DIR)
 CRAWLER_DIR = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.insert(0, MEDIACRAWLER_DIR)

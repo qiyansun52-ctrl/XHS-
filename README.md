@@ -139,7 +139,8 @@ npm run dev                 # http://localhost:5173
 cd crawler
 cp config.example.py config.py   # fill SUPABASE_URL, SUPABASE_KEY, ACCOUNT_MAP
 chmod +x setup_autostart.sh
-./setup_autostart.sh             # installs LaunchAgent, starts immediately
+./setup_autostart.sh             # installs LaunchAgent for this checkout
+# MEDIACRAWLER_DIR=/path/to/MediaCrawler ./setup_autostart.sh
 tail -f logs/server.log          # verify "✅ XHS 客户端初始化成功"
 ```
 
@@ -277,7 +278,8 @@ npm run dev                 # http://localhost:5173
 cd crawler
 cp config.example.py config.py   # 填入 SUPABASE_URL、SUPABASE_KEY、ACCOUNT_MAP
 chmod +x setup_autostart.sh
-./setup_autostart.sh             # 安装 LaunchAgent 并立即启动
+./setup_autostart.sh             # 为当前仓库路径安装 LaunchAgent
+# MEDIACRAWLER_DIR=/path/to/MediaCrawler ./setup_autostart.sh
 tail -f logs/server.log          # 看到 "✅ XHS 客户端初始化成功" 即可
 ```
 
