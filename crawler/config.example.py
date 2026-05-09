@@ -57,3 +57,22 @@ OPENAI_VISION_MODEL = "gpt-4.1-mini"
 # RRF 分数与之不可比，is_sparse_result 内部已分开判定。
 AI_RESEARCH_MIN_RESULTS = 3
 AI_RESEARCH_MIN_SIMILARITY = 0.55
+
+# ── AI 外部发现闭环 ─────────────────────────────────────────────
+# 默认关闭。确认 schema、AI API、爬虫搜索能力都可用后再打开。
+EXTERNAL_DISCOVERY_ENABLED = False
+
+# ask_first: AI 先给内部回答，用户点击后才创建发现任务。
+# auto_after_sparse: 内部匹配不足时自动创建发现任务，但候选仍需人工审核才能入库。
+EXTERNAL_DISCOVERY_TRIGGER_MODE = "ask_first"
+
+# 每个发现任务的爬取上限。先保守，避免影响小红书登录态和风控。
+EXTERNAL_DISCOVERY_MAX_QUERIES = 4
+EXTERNAL_DISCOVERY_MAX_KEYWORD_RESULTS = 20
+EXTERNAL_DISCOVERY_MAX_BENCHMARK_ACCOUNTS = 3
+EXTERNAL_DISCOVERY_MAX_POSTS_PER_BENCHMARK = 10
+EXTERNAL_DISCOVERY_MAX_CANDIDATES = 30
+EXTERNAL_DISCOVERY_REQUEST_DELAY_SECONDS = 2
+
+# 24 小时内相似搜索复用已有 job，减少重复爬取。
+EXTERNAL_DISCOVERY_REUSE_WINDOW_HOURS = 24

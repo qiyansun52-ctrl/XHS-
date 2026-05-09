@@ -239,3 +239,91 @@ language sql stable as $$
   order by k.embedding <=> query_embedding
   limit match_count
 $$;
+
+-- ===============================================================
+-- AI 外部发现闭环 schema（追加）
+-- 在 Supabase Dashboard -> SQL Editor 中粘贴并执行
+-- ===============================================================
+
+create table if not exists external_discovery_jobs (
+  id uuid primary key default gen_random_uuid(),
+  user_question text not null,
+  task_type text not null check (task_type in ('material', 'experience', 'image_reference', 'mixed')),
+  trigger_reason text not null check (trigger_reason in ('sparse_recall', 'zero_recall', 'user_requested')),
+  internal_answer_payload jsonb not null default '{}'::jsonb,
+  search_queries text[] not null default '{}',
+  benchmark_account_ids uuid[] not null default '{}',
+  status text not null default 'pending' check (status in ('pending', 'running', 'completed', 'failed', 'cancelled')),
+  error_message text,
+  created_by_member_id uuid references members(id) on delete set null,
+  started_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_external_discovery_jobs_status
+  on external_discovery_jobs(status, created_at);
+
+create index if not exists idx_external_discovery_jobs_created_at
+  on external_discovery_jobs(created_at desc);
+
+alter table external_discovery_jobs enable row level security;
+create policy "team_access" on external_discovery_jobs for all using (true) with check (true);
+
+create table if not exists external_discovery_candidates (
+  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references external_discovery_jobs(id) on delete cascade,
+  source_path text not null check (source_path in ('keyword_search', 'benchmark_expansion')),
+  search_query text,
+  benchmark_account_id uuid references benchmark_accounts(id) on delete set null,
+  xhs_note_id text,
+  url text not null,
+  title text not null default '',
+  caption text not null default '',
+  cover_image text,
+  images text[] not null default '{}',
+  tags text[] not null default '{}',
+  author_name text,
+  likes integer default 0,
+  saves integer default 0,
+  comments integer default 0,
+  views integer default 0,
+  candidate_score double precision not null default 0,
+  ai_reason text,
+  review_status text not null default 'pending' check (review_status in ('pending', 'approved', 'ignored', 'rejected')),
+  review_reason text check (
+    review_reason is null or review_reason in ('不相关', '低质量', '疑似广告', '重复素材', '不适合团队调性', '数据异常')
+  ),
+  approved_viral_post_id uuid,
+  created_at timestamptz default now(),
+  reviewed_at timestamptz,
+  unique(job_id, url)
+);
+
+create index if not exists idx_external_discovery_candidates_job_score
+  on external_discovery_candidates(job_id, candidate_score desc);
+
+create index if not exists idx_external_discovery_candidates_review
+  on external_discovery_candidates(review_status, created_at desc);
+
+create index if not exists idx_external_discovery_candidates_note_id
+  on external_discovery_candidates(xhs_note_id)
+  where xhs_note_id is not null;
+
+alter table external_discovery_candidates enable row level security;
+create policy "team_access" on external_discovery_candidates for all using (true) with check (true);
+
+alter table ai_research_notes
+  add column if not exists external_candidate_references jsonb not null default '[]'::jsonb;
+
+alter table viral_posts
+  add column if not exists discovery_candidate_id uuid references external_discovery_candidates(id) on delete set null;
+
+alter table viral_posts
+  add column if not exists source_origin text not null default 'manual'
+  check (source_origin in ('manual', 'crawler', 'ai_external_discovery'));
+
+create index if not exists idx_viral_posts_discovery_candidate
+  on viral_posts(discovery_candidate_id)
+  where discovery_candidate_id is not null;
