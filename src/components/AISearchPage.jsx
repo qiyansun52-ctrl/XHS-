@@ -485,6 +485,7 @@ export default function AISearchPage() {
     activeDiscoveryJobIdRef.current = null;
     setDiscoveryLoading(true);
     setDiscoveryError("");
+    setExternalSupplement(null);
     try {
       const { job } = await createDiscoveryJob({
         user_question: answer.question,
