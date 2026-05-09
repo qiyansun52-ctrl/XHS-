@@ -34,7 +34,22 @@ def _extract_items(payload: Any) -> List[Dict[str, Any]]:
 
 def _is_signature_fallback_error(exc: Exception) -> bool:
     if isinstance(exc, TypeError):
-        return True
+        message = str(exc).strip().lower()
+        signature_error_markers = (
+            "unexpected keyword",
+            "unexpected argument",
+            "got an unexpected",
+            "got multiple values",
+            "missing required positional argument",
+            "missing 1 required positional argument",
+            "missing 2 required positional arguments",
+            "required positional argument",
+            "positional argument",
+            "positional arguments",
+        )
+        if any(marker in message for marker in signature_error_markers):
+            return True
+        return "takes " in message and "argument" in message and ("given" in message or "expected" in message)
     if not isinstance(exc, AttributeError):
         return False
 

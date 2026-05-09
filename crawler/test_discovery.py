@@ -121,6 +121,31 @@ class FakeExplodingSearchClient:
         raise AttributeError(self.message)
 
 
+class FakeTypeErrorSearchClient:
+    def __init__(self, message):
+        self.calls = 0
+        self.message = message
+
+    async def search_note(self, keyword, page=1, page_size=10, sort=None):
+        self.calls += 1
+        raise TypeError(self.message)
+
+
+class FakeSignatureMismatchSearchClient:
+    def __init__(self):
+        self.calls = 0
+
+    async def search_note(self, keyword, page=1, page_size=10, sort=None):
+        self.calls += 1
+        if sort is not None:
+            raise TypeError("search_note() got an unexpected keyword argument 'sort'")
+        return {
+            "items": [
+                {"note_id": "fallback-1", "display_title": keyword}
+            ]
+        }
+
+
 class XhsDiscoveryAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_adapter_uses_available_search_method(self):
         from xhs_discovery import search_keyword_notes
@@ -159,6 +184,24 @@ class XhsDiscoveryAdapterTests(unittest.IsolatedAsyncioTestCase):
                     await search_keyword_notes(client, "澳洲申请", limit=5)
 
                 self.assertEqual(client.calls, 1)
+
+    async def test_search_adapter_does_not_retry_internal_type_error(self):
+        from xhs_discovery import search_keyword_notes
+
+        client = FakeTypeErrorSearchClient("internal parser failed")
+        with self.assertRaisesRegex(TypeError, "internal parser failed"):
+            await search_keyword_notes(client, "澳洲申请", limit=5)
+
+        self.assertEqual(client.calls, 1)
+
+    async def test_search_adapter_retries_signature_type_error_without_sort(self):
+        from xhs_discovery import search_keyword_notes
+
+        client = FakeSignatureMismatchSearchClient()
+        rows = await search_keyword_notes(client, "澳洲申请", limit=5)
+
+        self.assertEqual(rows[0]["note_id"], "fallback-1")
+        self.assertEqual(client.calls, 2)
 
 
 class DiscoveryServiceTests(unittest.TestCase):
