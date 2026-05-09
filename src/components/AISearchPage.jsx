@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Bot, Bookmark, Image as ImageIcon, Loader2, Send, Sparkles } from "lucide-react";
 import { supabase } from "../supabase.js";
 import {
@@ -70,14 +70,22 @@ function SectionCard({ title, children }) {
   );
 }
 
-function DiscoveryCandidateCard({ candidate, onReview }) {
+const DISCOVERY_SOURCE_PATH_LABELS = {
+  benchmark_expansion: "对标账号扩展",
+};
+
+function DiscoveryCandidateCard({ candidate, onReview, isReviewing }) {
+  const reviewStatus = candidate.review_status || "pending";
   const statusLabel = {
     pending: "待处理",
     ignored: "已忽略",
     rejected: "已拒绝",
     approved: "已采纳",
-  }[candidate.status] || candidate.status || "待处理";
-  const isReviewed = ["ignored", "rejected", "approved"].includes(candidate.status);
+  }[reviewStatus] || reviewStatus;
+  const isReviewed = reviewStatus !== "pending";
+  const isActionDisabled = isReviewed || isReviewing;
+  const sourcePathLabel = DISCOVERY_SOURCE_PATH_LABELS[candidate.source_path] || "关键词搜索";
+  const detailText = candidate.caption || candidate.ai_reason || "暂无摘要，建议打开原始链接人工判断。";
 
   return (
     <div style={{
@@ -90,12 +98,29 @@ function DiscoveryCandidateCard({ candidate, onReview }) {
       gap: 10,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#e0e0e0", lineHeight: 1.45 }}>
-            {candidate.title || candidate.account_name || "未命名候选素材"}
-          </div>
-          <div style={{ fontSize: 11, color: "#555", marginTop: 5 }}>
-            {candidate.platform || "外部来源"} · 相关度 {candidate.relevance_score ?? "-"}
+        <div style={{ display: "flex", gap: 10, minWidth: 0 }}>
+          {candidate.cover_image && (
+            <img
+              src={candidate.cover_image}
+              alt=""
+              style={{
+                width: 58,
+                height: 58,
+                borderRadius: 8,
+                objectFit: "cover",
+                border: "1px solid #222",
+                background: "#111",
+                flexShrink: 0,
+              }}
+            />
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#e0e0e0", lineHeight: 1.45 }}>
+              {candidate.title || candidate.account_name || "未命名候选素材"}
+            </div>
+            <div style={{ fontSize: 11, color: "#555", marginTop: 5 }}>
+              {sourcePathLabel} · {candidate.platform || "外部来源"} · 候选分 {candidate.candidate_score ?? "-"}
+            </div>
           </div>
         </div>
         <span style={{
@@ -120,20 +145,20 @@ function DiscoveryCandidateCard({ candidate, onReview }) {
         WebkitBoxOrient: "vertical",
         overflow: "hidden",
       }}>
-        {candidate.summary || candidate.description || candidate.reason || "暂无摘要，建议打开原始链接人工判断。"}
+        {detailText}
       </div>
 
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: "#444" }}>
-        {candidate.likes_count != null && <span>赞 {candidate.likes_count}</span>}
-        {candidate.saves_count != null && <span>藏 {candidate.saves_count}</span>}
-        {candidate.comments_count != null && <span>评 {candidate.comments_count}</span>}
+        {candidate.likes != null && <span>赞 {candidate.likes}</span>}
+        {candidate.saves != null && <span>藏 {candidate.saves}</span>}
+        {candidate.comments != null && <span>评 {candidate.comments}</span>}
         {candidate.author_name && <span>{candidate.author_name}</span>}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        {candidate.source_url && (
+        {candidate.url && (
           <a
-            href={candidate.source_url}
+            href={candidate.url}
             target="_blank"
             rel="noreferrer"
             style={{ fontSize: 12, color: "#54A0FF", textDecoration: "none", marginRight: "auto" }}
@@ -143,31 +168,31 @@ function DiscoveryCandidateCard({ candidate, onReview }) {
         )}
         <button
           type="button"
-          disabled={isReviewed}
+          disabled={isActionDisabled}
           onClick={() => onReview(candidate, "ignore")}
           style={{
             padding: "7px 10px",
             borderRadius: 8,
             border: "1px solid #2a2a2a",
             background: "transparent",
-            color: isReviewed ? "#444" : "#aaa",
-            cursor: isReviewed ? "not-allowed" : "pointer",
+            color: isActionDisabled ? "#444" : "#aaa",
+            cursor: isActionDisabled ? "not-allowed" : "pointer",
             fontSize: 12,
           }}
         >
-          忽略
+          {isReviewing ? "处理中…" : "忽略"}
         </button>
         <button
           type="button"
-          disabled={isReviewed}
+          disabled={isActionDisabled}
           onClick={() => onReview(candidate, "reject")}
           style={{
             padding: "7px 10px",
             borderRadius: 8,
             border: "1px solid rgba(255,36,66,0.25)",
             background: "rgba(255,36,66,0.06)",
-            color: isReviewed ? "#444" : "#FF2442",
-            cursor: isReviewed ? "not-allowed" : "pointer",
+            color: isActionDisabled ? "#444" : "#FF2442",
+            cursor: isActionDisabled ? "not-allowed" : "pointer",
             fontSize: 12,
           }}
         >
@@ -314,6 +339,7 @@ export default function AISearchPage() {
   const [discoveryCandidates, setDiscoveryCandidates] = useState([]);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryError, setDiscoveryError] = useState("");
+  const [reviewingCandidateId, setReviewingCandidateId] = useState(null);
 
   const uploadImage = async () => {
     if (!imageFile) return null;
@@ -356,12 +382,12 @@ export default function AISearchPage() {
     }
   };
 
-  const refreshDiscoveryJob = async (jobId) => {
+  const refreshDiscoveryJob = useCallback(async (jobId) => {
     const payload = await getDiscoveryJob(jobId);
     setDiscoveryJob(payload.job);
     setDiscoveryCandidates(payload.candidates || []);
     return payload.job;
-  };
+  }, []);
 
   const handleCreateDiscovery = async () => {
     if (!answer) return;
@@ -374,7 +400,7 @@ export default function AISearchPage() {
         task_type: answer.task_type || "mixed",
         trigger_reason: answer.discovery_trigger_reason || "user_requested",
         internal_answer_payload: answer,
-        search_queries: answer.suggested_search_queries || [],
+        search_queries: answer.suggested_search_queries?.length ? answer.suggested_search_queries : null,
         benchmark_account_ids: [],
       });
       setDiscoveryJob(job);
@@ -387,6 +413,9 @@ export default function AISearchPage() {
   };
 
   const handleCandidateReview = async (candidate, action) => {
+    if ((candidate.review_status || "pending") !== "pending" || reviewingCandidateId) return;
+
+    setReviewingCandidateId(candidate.id);
     try {
       const resp = action === "ignore"
         ? await ignoreDiscoveryCandidate(candidate.id)
@@ -395,6 +424,8 @@ export default function AISearchPage() {
       setDiscoveryCandidates(prev => prev.map(item => item.id === candidate.id ? { ...item, ...updated } : item));
     } catch (err) {
       alert(err.message || "操作失败，请稍后重试。");
+    } finally {
+      setReviewingCandidateId(null);
     }
   };
 
@@ -432,9 +463,9 @@ export default function AISearchPage() {
     }, 5000);
 
     return () => window.clearInterval(timer);
-  }, [discoveryJob?.id, discoveryJob?.status]);
+  }, [discoveryJob?.id, discoveryJob?.status, refreshDiscoveryJob]);
 
-  const canCreateDiscovery = answer?.can_external_discover || answer?.suggested_search_queries?.length > 0;
+  const canCreateDiscovery = answer?.can_external_discover;
   const discoveryStatusText = {
     pending: "等待开始",
     running: "正在发现",
@@ -678,6 +709,7 @@ export default function AISearchPage() {
                   key={candidate.id}
                   candidate={candidate}
                   onReview={handleCandidateReview}
+                  isReviewing={reviewingCandidateId === candidate.id}
                 />
               ))}
             </div>
