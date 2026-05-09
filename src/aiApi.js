@@ -46,6 +46,10 @@ export async function createDiscoveryJob(payload) {
   return postJson("/ai/discovery-jobs", payload);
 }
 
+export async function createDiscoverySupplement(jobId) {
+  return postJson(`/ai/discovery-jobs/${jobId}/supplement`, {});
+}
+
 export async function getDiscoveryJob(jobId) {
   if (!BASE_URL || !API_KEY) {
     throw new Error("AI API 未配置，请检查 .env 中的 VITE_AI_API_URL 和 VITE_AI_API_KEY");

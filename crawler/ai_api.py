@@ -499,6 +499,30 @@ async def get_discovery_job(job_id: str):
         raise HTTPException(500, "读取外部发现任务失败，请稍后重试。")
 
 
+@app.post("/ai/discovery-jobs/{job_id}/supplement", dependencies=[Depends(require_api_key)])
+async def create_discovery_supplement(job_id: str):
+    try:
+        payload = discovery_service.get_job_with_candidates(job_id)
+        job = payload["job"]
+        candidates = [
+            row for row in payload["candidates"]
+            if row.get("review_status") in ("pending", "approved")
+        ]
+        result = await research_service.generate_external_supplement(
+            job_id=job_id,
+            question=job.get("user_question") or "",
+            candidates=candidates,
+        )
+        if hasattr(result, "model_dump"):
+            return result.model_dump()
+        return result.dict()
+    except DiscoveryNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        log.error(f"生成外部补充回答失败: {e}")
+        raise HTTPException(500, "生成外部补充回答失败，请稍后重试。")
+
+
 @app.post("/ai/discovery-candidates/{candidate_id}/ignore", dependencies=[Depends(require_api_key)])
 async def ignore_discovery_candidate(candidate_id: str):
     try:

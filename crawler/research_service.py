@@ -10,8 +10,8 @@ try:
 except Exception:
     OpenAI = None
 
-from research_models import ImageAnalysis, KnowledgeSource, ResearchAnswer, ResearchRequest
-from discovery import derive_search_queries
+from research_models import ExternalSupplementAnswer, ImageAnalysis, KnowledgeSource, ResearchAnswer, ResearchRequest
+from discovery import derive_search_queries, validate_external_candidate_ids
 from retrieval import (
     detect_task_type,
     is_sparse_result,
@@ -442,6 +442,125 @@ class ResearchService:
             "image_analysis": model_to_dict(image_analysis) if image_analysis else None,
             "general_advice": [{"text": "可用情绪共鸣开头，再给出具体步骤。", "reason": "internal evidence was sparse"}] if sparse else [],
         }
+
+    async def generate_external_supplement(
+        self,
+        job_id: str,
+        question: str,
+        candidates: List[Dict[str, Any]],
+    ) -> ExternalSupplementAnswer:
+        allowed_ids = {str(candidate.get("id")) for candidate in candidates if candidate.get("id")}
+        if not candidates:
+            return ExternalSupplementAnswer(
+                job_id=job_id,
+                conclusion="本次外部发现没有找到可用候选素材。",
+            )
+
+        if not self.openai:
+            top = candidates[:3]
+            recommendations = [
+                {
+                    "text": f"外部候选《{candidate.get('title') or candidate.get('account_name') or '未命名素材'}》可作为补充参考，建议人工审核后再纳入团队知识库。",
+                    "candidate_ids": [str(candidate["id"])],
+                }
+                for candidate in top
+                if candidate.get("id")
+            ]
+            candidate_references = [str(candidate["id"]) for candidate in top if candidate.get("id")]
+            return ExternalSupplementAnswer(
+                job_id=job_id,
+                conclusion="根据本次外部发现，以下待审核候选素材可作为内部回答的补充参考。",
+                recommendations=recommendations,
+                candidate_references=candidate_references,
+            )
+
+        source_context = [
+            {
+                "id": str(candidate.get("id")),
+                "title": candidate.get("title") or candidate.get("account_name") or "",
+                "caption": (candidate.get("caption") or candidate.get("ai_reason") or "")[:800],
+                "author_name": candidate.get("author_name"),
+                "platform": candidate.get("platform"),
+                "url": candidate.get("url"),
+                "likes": candidate.get("likes"),
+                "saves": candidate.get("saves"),
+                "comments": candidate.get("comments"),
+                "candidate_score": candidate.get("candidate_score"),
+            }
+            for candidate in candidates[:12]
+            if candidate.get("id")
+        ]
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "conclusion": {"type": "string"},
+                "recommendations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "text": {"type": "string"},
+                            "candidate_ids": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["text", "candidate_ids"],
+                    },
+                },
+                "candidate_references": {"type": "array", "items": {"type": "string"}},
+                "general_advice": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "text": {"type": "string"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["text", "reason"],
+                    },
+                },
+            },
+            "required": ["conclusion", "recommendations", "candidate_references", "general_advice"],
+        }
+        prompt = {
+            "job_id": job_id,
+            "question": question,
+            "allowed_candidates": source_context,
+            "rules": [
+                "只能引用 allowed_candidates 中存在的 id；candidate_ids 和 candidate_references 必须严格匹配 allowed_candidates 的 id。",
+                "所有基于外部素材的 recommendation 都必须带至少一个 candidate_ids。",
+                "没有候选素材支持的建议必须放进 general_advice，并写明 reason。",
+                "明确提醒这些内容来自待审核外部素材，尚未进入团队知识库。",
+                "回答要面向小红书留学内容运营，中文输出。",
+            ],
+        }
+
+        def _call():
+            return self.openai.responses.create(
+                model=OPENAI_TEXT_MODEL,
+                instructions="你是小红书留学内容团队的 AI 外部素材研究员。你必须输出符合 schema 的 JSON，且不得编造 allowed_candidates 之外的素材。",
+                input=json.dumps(prompt, ensure_ascii=False),
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "external_supplement_answer",
+                        "strict": True,
+                        "schema": schema,
+                    }
+                },
+            )
+
+        resp = await asyncio.to_thread(_call)
+        payload = json.loads(resp.output_text)
+        validated = validate_external_candidate_ids(payload, allowed_candidate_ids=allowed_ids)
+        return ExternalSupplementAnswer(
+            job_id=job_id,
+            conclusion=validated.get("conclusion") or "外部候选素材已整理完成，请先人工审核后再使用。",
+            recommendations=validated.get("recommendations", []),
+            candidate_references=validated.get("candidate_references", []),
+            general_advice=validated.get("general_advice", []),
+        )
 
     def _source_types_for_task(self, task_type: str) -> Optional[List[str]]:
         if task_type == "experience":

@@ -3,6 +3,7 @@ import { Bot, Bookmark, Image as ImageIcon, Loader2, Send, Sparkles } from "luci
 import { supabase } from "../supabase.js";
 import {
   createDiscoveryJob,
+  createDiscoverySupplement,
   getDiscoveryJob,
   ignoreDiscoveryCandidate,
   rejectDiscoveryCandidate,
@@ -203,6 +204,81 @@ function DiscoveryCandidateCard({ candidate, onReview, isReviewing }) {
   );
 }
 
+function ExternalSupplementCard({ supplement }) {
+  if (!supplement) return null;
+
+  return (
+    <div style={{
+      marginTop: 14,
+      background: "linear-gradient(180deg, rgba(255,159,67,0.08), rgba(13,13,13,1) 46%)",
+      border: "1px solid rgba(255,159,67,0.18)",
+      borderRadius: 12,
+      padding: 16,
+    }}>
+      <div style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 11,
+        color: "#FF9F43",
+        background: "rgba(255,159,67,0.08)",
+        border: "1px solid rgba(255,159,67,0.18)",
+        borderRadius: 999,
+        padding: "4px 9px",
+        marginBottom: 12,
+      }}>
+        待审核外部素材
+      </div>
+      {supplement.warning && (
+        <div style={{ fontSize: 12, color: "#FF9F43", lineHeight: 1.6, marginBottom: 10 }}>
+          {supplement.warning}
+        </div>
+      )}
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", lineHeight: 1.7 }}>
+        {supplement.conclusion}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+        {(supplement.recommendations || []).length === 0 && (
+          <div style={{ fontSize: 13, color: "#555" }}>暂无可引用的外部补充建议。</div>
+        )}
+        {(supplement.recommendations || []).map((rec, index) => (
+          <div key={index} style={{ background: "#0a0a0a", border: "1px solid #222", borderRadius: 8, padding: 12 }}>
+            <div style={{ fontSize: 13, color: "#ddd", lineHeight: 1.65 }}>{rec.text}</div>
+            {rec.candidate_ids?.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                {rec.candidate_ids.map(id => (
+                  <span key={id} style={{
+                    fontSize: 10,
+                    color: "#FF9F43",
+                    background: "rgba(255,159,67,0.08)",
+                    border: "1px solid rgba(255,159,67,0.18)",
+                    borderRadius: 999,
+                    padding: "2px 7px",
+                  }}>
+                    候选 {id.slice(0, 8)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {supplement.general_advice?.length > 0 && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 11, color: "#666" }}>未绑定候选素材的通用提醒</div>
+          {supplement.general_advice.map((item, index) => (
+            <div key={index} style={{ fontSize: 12, color: "#aaa", lineHeight: 1.6 }}>
+              {item.text}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AnswerView({ answer, onSave, savingNote, isMobile }) {
   if (!answer) return null;
 
@@ -340,6 +416,8 @@ export default function AISearchPage() {
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryError, setDiscoveryError] = useState("");
   const [reviewingCandidateId, setReviewingCandidateId] = useState(null);
+  const [externalSupplement, setExternalSupplement] = useState(null);
+  const [supplementLoading, setSupplementLoading] = useState(false);
   const discoveryRequestSeqRef = useRef(0);
   const activeDiscoveryJobIdRef = useRef(null);
 
@@ -381,6 +459,7 @@ export default function AISearchPage() {
       setDiscoveryLoading(false);
       setDiscoveryError("");
       setReviewingCandidateId(null);
+      setExternalSupplement(null);
     } catch (err) {
       setError(err.message || "AI 服务暂时不可用，请稍后再试。");
     } finally {
@@ -419,6 +498,7 @@ export default function AISearchPage() {
       activeDiscoveryJobIdRef.current = job.id;
       setDiscoveryJob(job);
       setDiscoveryCandidates([]);
+      setExternalSupplement(null);
     } catch (err) {
       if (discoveryRequestSeqRef.current !== requestSeq) return;
       setDiscoveryError(err.message || "创建外部发现任务失败，请稍后重试。");
@@ -426,6 +506,19 @@ export default function AISearchPage() {
       if (discoveryRequestSeqRef.current === requestSeq) {
         setDiscoveryLoading(false);
       }
+    }
+  };
+
+  const handleCreateSupplement = async () => {
+    if (!discoveryJob?.id) return;
+    setSupplementLoading(true);
+    try {
+      const result = await createDiscoverySupplement(discoveryJob.id);
+      setExternalSupplement(result);
+    } catch (err) {
+      alert(err.message || "生成外部补充回答失败，请稍后重试。");
+    } finally {
+      setSupplementLoading(false);
     }
   };
 
@@ -741,6 +834,34 @@ export default function AISearchPage() {
               ))}
             </div>
           )}
+
+          {discoveryJob?.status === "completed" && discoveryCandidates.length > 0 && (
+            <button
+              type="button"
+              onClick={handleCreateSupplement}
+              disabled={supplementLoading}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                marginTop: 14,
+                padding: "10px 14px",
+                borderRadius: 8,
+                border: "1px solid rgba(255,159,67,0.25)",
+                background: supplementLoading ? "#333" : "rgba(255,159,67,0.1)",
+                color: supplementLoading ? "#777" : "#FF9F43",
+                cursor: supplementLoading ? "not-allowed" : "pointer",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              {supplementLoading ? <Loader2 size={15} /> : <Sparkles size={15} />}
+              {supplementLoading ? "生成外部补充中…" : "生成待审核外部补充回答"}
+            </button>
+          )}
+
+          <ExternalSupplementCard supplement={externalSupplement} />
         </section>
       )}
     </div>

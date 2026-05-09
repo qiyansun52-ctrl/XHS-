@@ -386,6 +386,47 @@ class DiscoveryApiTests(unittest.TestCase):
         self.assertEqual(ctx.exception.detail, "候选素材不存在或已审核")
 
 
+class ExternalSupplementTests(unittest.TestCase):
+    def test_external_supplement_fallback_uses_top_three_allowed_candidates(self):
+        service = research_service.ResearchService(None, None)
+        service.openai = None
+        candidates = [
+            {"id": "c1", "title": "英国申请焦虑", "caption": "焦虑开头"},
+            {"id": "c2", "title": "文书避坑", "caption": "避坑清单"},
+            {"id": "c3", "title": "选校经验", "caption": "真实案例"},
+            {"id": "c4", "title": "多余素材", "caption": "不会进入前三"},
+        ]
+
+        answer = asyncio.run(service.generate_external_supplement(
+            job_id="job-1",
+            question="英国申请焦虑方向有什么爆款素材？",
+            candidates=candidates,
+        ))
+
+        self.assertEqual(answer.job_id, "job-1")
+        self.assertEqual(answer.warning, "以下内容来自待审核外部素材，尚未进入团队知识库。")
+        self.assertEqual(answer.candidate_references, ["c1", "c2", "c3"])
+        self.assertEqual(len(answer.recommendations), 3)
+        self.assertEqual(
+            [candidate_id for rec in answer.recommendations for candidate_id in rec.candidate_ids],
+            ["c1", "c2", "c3"],
+        )
+
+    def test_external_supplement_returns_empty_answer_without_candidates(self):
+        service = research_service.ResearchService(None, None)
+        service.openai = None
+
+        answer = asyncio.run(service.generate_external_supplement(
+            job_id="job-empty",
+            question="找素材",
+            candidates=[],
+        ))
+
+        self.assertEqual(answer.conclusion, "本次外部发现没有找到可用候选素材。")
+        self.assertEqual(answer.recommendations, [])
+        self.assertEqual(answer.candidate_references, [])
+
+
 class DiscoveryHelperTests(unittest.TestCase):
     def test_research_answer_omits_inactive_discovery_trigger_mode_by_default(self):
         answer = ResearchAnswer(

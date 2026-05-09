@@ -46,6 +46,20 @@ class GeneralAdvice(BaseModel):
     reason: str
 
 
+class ExternalRecommendation(BaseModel):
+    text: str
+    candidate_ids: List[str] = Field(default_factory=list)
+
+
+class ExternalSupplementAnswer(BaseModel):
+    job_id: str
+    conclusion: str
+    recommendations: List[ExternalRecommendation] = Field(default_factory=list)
+    candidate_references: List[str] = Field(default_factory=list)
+    general_advice: List[GeneralAdvice] = Field(default_factory=list)
+    warning: str = "以下内容来自待审核外部素材，尚未进入团队知识库。"
+
+
 class ResearchRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
     image_url: Optional[str] = None
