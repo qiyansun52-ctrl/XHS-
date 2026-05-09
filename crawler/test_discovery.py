@@ -86,6 +86,24 @@ class FakeSupabase:
         return table
 
 
+class FakeSearchClient:
+    async def search_note(self, keyword, page=1, page_size=10, sort="general"):
+        return {
+            "items": [
+                {"note_id": "n1", "display_title": keyword, "xsec_token": "token"}
+            ]
+        }
+
+
+class XhsDiscoveryAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_search_adapter_uses_available_search_method(self):
+        from xhs_discovery import search_keyword_notes
+
+        rows = await search_keyword_notes(FakeSearchClient(), "英国留学", limit=5)
+        self.assertEqual(rows[0]["note_id"], "n1")
+        self.assertEqual(rows[0]["display_title"], "英国留学")
+
+
 class DiscoveryServiceTests(unittest.TestCase):
     def test_create_job_truncates_provided_queries_and_inserts_pending_job(self):
         sb = FakeSupabase()
