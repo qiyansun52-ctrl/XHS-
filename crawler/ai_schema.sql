@@ -142,6 +142,7 @@ create index if not exists idx_knowledge_items_embed_status
   where embed_status = 'pending';
 
 alter table knowledge_items enable row level security;
+drop policy if exists "team_access" on knowledge_items;
 create policy "team_access" on knowledge_items for all using (true) with check (true);
 
 create table if not exists ai_research_notes (
@@ -161,6 +162,7 @@ create table if not exists ai_research_notes (
 );
 
 alter table ai_research_notes enable row level security;
+drop policy if exists "team_access" on ai_research_notes;
 create policy "team_access" on ai_research_notes for all using (true) with check (true);
 
 create table if not exists ai_research_feedback (
@@ -173,6 +175,7 @@ create table if not exists ai_research_feedback (
 );
 
 alter table ai_research_feedback enable row level security;
+drop policy if exists "team_access" on ai_research_feedback;
 create policy "team_access" on ai_research_feedback for all using (true) with check (true);
 
 create or replace function match_knowledge_items(
@@ -302,6 +305,9 @@ create table if not exists external_discovery_candidates (
   reviewed_at timestamptz,
   unique(job_id, url)
 );
+
+alter table external_discovery_candidates
+  add column if not exists approved_viral_post_id uuid;
 
 do $$
 begin
