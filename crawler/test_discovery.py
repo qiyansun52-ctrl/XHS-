@@ -82,6 +82,8 @@ class FakeTable:
                 return FakeResult(self.client.insert_responses[self.name])
             return FakeResult(self.insert_payload)
         if self.update_payload is not None:
+            if self.name in self.client.update_response_sequences and self.client.update_response_sequences[self.name]:
+                return FakeResult(self.client.update_response_sequences[self.name].pop(0))
             if self.name in self.client.update_responses:
                 return FakeResult(self.client.update_responses[self.name])
             return FakeResult([self.update_payload])
@@ -105,6 +107,7 @@ class FakeSupabase:
         self.response_sequences = {}
         self.insert_responses = {}
         self.update_responses = {}
+        self.update_response_sequences = {}
         self.upsert_responses = {}
         self.upserts = []
         self.tables = []
@@ -435,7 +438,10 @@ class DiscoveryServiceTests(unittest.TestCase):
             "knowledge_items": None,
         })
         sb.update_responses["viral_posts"] = [{**existing_viral_post, "title": "新标题"}]
-        sb.update_responses["external_discovery_candidates"] = [approved_candidate]
+        sb.update_response_sequences["external_discovery_candidates"] = [
+            [{**candidate, "review_status": "approved"}],
+            [approved_candidate],
+        ]
         service = DiscoveryService(sb)
 
         result = service.approve_candidate("candidate-1")
@@ -475,7 +481,10 @@ class DiscoveryServiceTests(unittest.TestCase):
         })
         sb.response_sequences["viral_posts"] = [None, existing_viral_post]
         sb.update_responses["viral_posts"] = [{**existing_viral_post, "title": "新标题"}]
-        sb.update_responses["external_discovery_candidates"] = [approved_candidate]
+        sb.update_response_sequences["external_discovery_candidates"] = [
+            [{**candidate, "review_status": "approved"}],
+            [approved_candidate],
+        ]
         service = DiscoveryService(sb)
 
         result = service.approve_candidate("candidate-1")
@@ -484,6 +493,9 @@ class DiscoveryServiceTests(unittest.TestCase):
         viral_lookups = [table for table in sb.tables if table.name == "viral_posts" and table.update_payload is None]
         self.assertIn(("eq", "xhs_note_id", "note-1"), viral_lookups[0].calls)
         self.assertIn(("eq", "url", "https://www.xiaohongshu.com/explore/note-1"), viral_lookups[1].calls)
+        self.assertIn(("order", "created_at", True), viral_lookups[1].calls)
+        self.assertIn(("limit", 1), viral_lookups[1].calls)
+        self.assertNotIn(("maybe_single",), viral_lookups[1].calls)
         viral_update = next(table for table in sb.tables if table.name == "viral_posts" and table.update_payload)
         self.assertIn(("eq", "id", "viral-url-match"), viral_update.calls)
         self.assertFalse(any(table.name == "viral_posts" and table.insert_payload for table in sb.tables))
@@ -492,12 +504,117 @@ class DiscoveryServiceTests(unittest.TestCase):
         for row in (None, {"id": "candidate-1", "review_status": "ignored"}):
             with self.subTest(row=row):
                 sb = FakeSupabase({"external_discovery_candidates": row})
+                sb.update_response_sequences["external_discovery_candidates"] = [[]]
                 service = DiscoveryService(sb)
 
                 with self.assertRaises(discovery_service.DiscoveryNotFoundError) as ctx:
                     service.approve_candidate("candidate-1")
 
                 self.assertEqual(str(ctx.exception), "候选素材不存在或已审核")
+
+    def test_approve_candidate_lost_claim_to_rejected_does_not_mutate_viral_or_knowledge(self):
+        rejected_candidate = {
+            "id": "candidate-1",
+            "review_status": "rejected",
+            "url": "https://www.xiaohongshu.com/explore/note-1",
+            "xhs_note_id": "note-1",
+        }
+        sb = FakeSupabase({"external_discovery_candidates": rejected_candidate})
+        sb.update_response_sequences["external_discovery_candidates"] = [[]]
+        service = DiscoveryService(sb)
+
+        with self.assertRaises(discovery_service.DiscoveryNotFoundError) as ctx:
+            service.approve_candidate("candidate-1")
+
+        self.assertEqual(str(ctx.exception), "候选素材不存在或已审核")
+        self.assertEqual(sb.tables[0].name, "external_discovery_candidates")
+        self.assertIsNotNone(sb.tables[0].update_payload)
+        self.assertEqual(sb.tables[0].update_payload["review_status"], "approved")
+        self.assertIn(("eq", "review_status", "pending"), sb.tables[0].calls)
+        self.assertFalse(any(table.name == "viral_posts" and (table.insert_payload or table.update_payload) for table in sb.tables))
+        self.assertEqual(sb.upserts, [])
+
+    def test_approve_candidate_repairs_already_approved_candidate_with_link_by_indexing(self):
+        approved_candidate = {
+            "id": "candidate-1",
+            "review_status": "approved",
+            "approved_viral_post_id": "viral-1",
+            "url": "https://www.xiaohongshu.com/explore/note-1",
+            "xhs_note_id": "note-1",
+        }
+        linked_viral_post = {
+            "id": "viral-1",
+            "url": "https://www.xiaohongshu.com/explore/note-1",
+            "xhs_note_id": "note-1",
+            "title": "已入库标题",
+            "caption": "已入库正文",
+            "fetch_status": "done",
+            "created_at": "2026-05-09T00:00:00+00:00",
+        }
+        sb = FakeSupabase({"knowledge_items": None})
+        sb.update_response_sequences["external_discovery_candidates"] = [[]]
+        sb.response_sequences["external_discovery_candidates"] = [approved_candidate]
+        sb.response_sequences["viral_posts"] = [[linked_viral_post]]
+        service = DiscoveryService(sb)
+
+        result = service.approve_candidate("candidate-1")
+
+        self.assertEqual(result["review_status"], "approved")
+        self.assertEqual(result["approved_viral_post_id"], "viral-1")
+        self.assertFalse(any(table.name == "viral_posts" and (table.insert_payload or table.update_payload) for table in sb.tables))
+        self.assertEqual(sb.upserts[0]["table"], "knowledge_items")
+        self.assertEqual(sb.upserts[0]["payload"]["source_type"], "viral_post")
+        self.assertEqual(sb.upserts[0]["payload"]["source_id"], "viral-1")
+
+    def test_find_existing_viral_post_uses_order_and_limit_for_duplicate_note_lookup(self):
+        candidate = {
+            "id": "candidate-1",
+            "review_status": "pending",
+            "url": "https://www.xiaohongshu.com/explore/note-1",
+            "xhs_note_id": "note-1",
+            "title": "新标题",
+            "caption": "新正文",
+            "tags": ["英国"],
+        }
+        duplicate_rows = [
+            {
+                "id": "viral-newer",
+                "url": "https://new.example.com",
+                "xhs_note_id": "note-1",
+                "title": "较新重复",
+                "fetch_status": "done",
+                "created_at": "2026-05-09T00:00:00+00:00",
+            },
+            {
+                "id": "viral-older",
+                "url": "https://old.example.com",
+                "xhs_note_id": "note-1",
+                "title": "较旧重复",
+                "fetch_status": "done",
+                "created_at": "2026-05-08T00:00:00+00:00",
+            },
+        ]
+        approved_candidate = {
+            **candidate,
+            "review_status": "approved",
+            "approved_viral_post_id": "viral-newer",
+        }
+        sb = FakeSupabase({"knowledge_items": None})
+        sb.update_response_sequences["external_discovery_candidates"] = [[{**candidate, "review_status": "approved"}], [approved_candidate]]
+        sb.response_sequences["viral_posts"] = [duplicate_rows]
+        sb.update_responses["viral_posts"] = [{**duplicate_rows[0], "title": "新标题"}]
+        service = DiscoveryService(sb)
+
+        result = service.approve_candidate("candidate-1")
+
+        self.assertEqual(result["approved_viral_post_id"], "viral-newer")
+        viral_lookup = next(table for table in sb.tables if table.name == "viral_posts" and table.update_payload is None)
+        self.assertIn(("order", "created_at", True), viral_lookup.calls)
+        self.assertIn(("limit", 1), viral_lookup.calls)
+        self.assertNotIn(("maybe_single",), viral_lookup.calls)
+        viral_update = next(table for table in sb.tables if table.name == "viral_posts" and table.update_payload)
+        self.assertIn(("eq", "id", "viral-newer"), viral_update.calls)
+        self.assertFalse(any(table.name == "viral_posts" and table.insert_payload for table in sb.tables))
 
     def test_create_discovery_job_req_validates_enum_fields(self):
         with self.assertRaises(ValueError):

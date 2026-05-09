@@ -94,30 +94,53 @@ class DiscoveryService:
             raise DiscoveryNotFoundError("候选素材不存在或已审核")
         return rows[0]
 
+    def _first_row(self, data: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(data, list):
+            return data[0] if data else None
+        return data
+
+    def _get_candidate(self, candidate_id: str) -> Optional[Dict[str, Any]]:
+        res = (
+            self.sb.table("external_discovery_candidates")
+            .select("*")
+            .eq("id", candidate_id)
+            .limit(1)
+            .execute()
+        )
+        return self._first_row(res.data)
+
+    def _find_viral_post_by_id(self, viral_post_id: str) -> Optional[Dict[str, Any]]:
+        res = (
+            self.sb.table("viral_posts")
+            .select("*")
+            .eq("id", viral_post_id)
+            .limit(1)
+            .execute()
+        )
+        return self._first_row(res.data)
+
+    def _find_first_viral_post(self, column: str, value: str) -> Optional[Dict[str, Any]]:
+        res = (
+            self.sb.table("viral_posts")
+            .select("*")
+            .eq(column, value)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return self._first_row(res.data)
+
     def _find_existing_viral_post(self, candidate: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         xhs_note_id = (candidate.get("xhs_note_id") or "").strip()
         if xhs_note_id:
-            res = (
-                self.sb.table("viral_posts")
-                .select("*")
-                .eq("xhs_note_id", xhs_note_id)
-                .maybe_single()
-                .execute()
-            )
-            if res.data:
-                return res.data
+            row = self._find_first_viral_post("xhs_note_id", xhs_note_id)
+            if row:
+                return row
 
         url = (candidate.get("url") or "").strip()
         if not url:
             return None
-        res = (
-            self.sb.table("viral_posts")
-            .select("*")
-            .eq("url", url)
-            .maybe_single()
-            .execute()
-        )
-        return res.data
+        return self._find_first_viral_post("url", url)
 
     def _viral_payload_from_candidate(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
         note_parts = ["来源：AI 外部发现"]
@@ -145,17 +168,31 @@ class DiscoveryService:
         }
 
     def approve_candidate(self, candidate_id: str) -> Dict[str, Any]:
-        candidate_res = (
+        claim_payload = {
+            "review_status": "approved",
+            "review_reason": None,
+            "reviewed_at": now_iso(),
+        }
+        claim_res = (
             self.sb.table("external_discovery_candidates")
-            .select("*")
+            .update(claim_payload)
             .eq("id", candidate_id)
             .eq("review_status", "pending")
-            .maybe_single()
             .execute()
         )
-        candidate = candidate_res.data
-        if not candidate or candidate.get("review_status") != "pending":
-            raise DiscoveryNotFoundError("候选素材不存在或已审核")
+        claim_rows = claim_res.data or []
+        candidate = self._first_row(claim_rows)
+        if not candidate:
+            candidate = self._get_candidate(candidate_id)
+            if not candidate or candidate.get("review_status") != "approved":
+                raise DiscoveryNotFoundError("候选素材不存在或已审核")
+
+        linked_viral_post_id = candidate.get("approved_viral_post_id")
+        if linked_viral_post_id:
+            linked_viral_post = self._find_viral_post_by_id(linked_viral_post_id)
+            if linked_viral_post:
+                upsert_knowledge_item(self.sb, build_viral_post_item(linked_viral_post))
+                return candidate
 
         payload = self._viral_payload_from_candidate(candidate)
         existing = self._find_existing_viral_post(candidate)
@@ -176,22 +213,19 @@ class DiscoveryService:
         if not viral_post.get("id"):
             raise RuntimeError("入库素材缺少 ID，无法建立知识索引")
 
-        candidate_update = {
-            "review_status": "approved",
-            "review_reason": None,
-            "reviewed_at": now_iso(),
-            "approved_viral_post_id": viral_post["id"],
-        }
+        candidate_update = {"approved_viral_post_id": viral_post["id"]}
         candidate_update_res = (
             self.sb.table("external_discovery_candidates")
             .update(candidate_update)
             .eq("id", candidate_id)
-            .eq("review_status", "pending")
+            .eq("review_status", "approved")
             .execute()
         )
         candidate_rows = candidate_update_res.data or []
-        if not candidate_rows:
-            raise DiscoveryNotFoundError("候选素材不存在或已审核")
+        updated_candidate = self._first_row(candidate_rows) or {
+            **candidate,
+            "approved_viral_post_id": viral_post["id"],
+        }
 
         upsert_knowledge_item(self.sb, build_viral_post_item(viral_post))
-        return candidate_rows[0]
+        return updated_candidate
