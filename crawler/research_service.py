@@ -117,13 +117,18 @@ class ResearchService:
             for row in retrieved_rows[:5]
             if row.get("title")
         ]
+        can_external_discover = bool(sparse and EXTERNAL_DISCOVERY_ENABLED)
         suggested_search_queries = derive_search_queries(
             req.question,
             image_keywords=image_analysis.keywords if image_analysis else [],
             weak_titles=weak_titles,
             max_queries=EXTERNAL_DISCOVERY_MAX_QUERIES,
-        ) if sparse and EXTERNAL_DISCOVERY_ENABLED else []
-        discovery_trigger_reason = "zero_recall" if sparse and not retrieved_rows else "sparse_recall"
+        ) if can_external_discover else []
+        discovery_trigger_reason = (
+            ("zero_recall" if not retrieved_rows else "sparse_recall")
+            if can_external_discover
+            else None
+        )
 
         return ResearchAnswer(
             question=req.question,
@@ -137,10 +142,10 @@ class ResearchService:
             image_analysis=image_analysis,
             general_advice=validated.get("general_advice", []),
             sparse=sparse,
-            can_external_discover=bool(sparse and EXTERNAL_DISCOVERY_ENABLED),
-            discovery_trigger_reason=discovery_trigger_reason if sparse and EXTERNAL_DISCOVERY_ENABLED else None,
+            can_external_discover=can_external_discover,
+            discovery_trigger_reason=discovery_trigger_reason,
             suggested_search_queries=suggested_search_queries,
-            discovery_trigger_mode=EXTERNAL_DISCOVERY_TRIGGER_MODE,
+            discovery_trigger_mode=EXTERNAL_DISCOVERY_TRIGGER_MODE if can_external_discover else None,
             discovery_job_id=None,
             message=" ".join(messages) if messages else None,
         )

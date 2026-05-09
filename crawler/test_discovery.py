@@ -11,9 +11,30 @@ from discovery import (
     validate_external_candidate_ids,
 )
 import research_service
+from research_models import ResearchAnswer
+from research_service import model_to_dict
 
 
 class DiscoveryHelperTests(unittest.TestCase):
+    def test_research_answer_omits_inactive_discovery_trigger_mode_by_default(self):
+        answer = ResearchAnswer(
+            question="英国申请焦虑方向有什么爆款素材？",
+            task_type="material",
+            conclusion="内部资料足够回答。",
+        )
+
+        self.assertIsNone(model_to_dict(answer)["discovery_trigger_mode"])
+
+    def test_research_answer_serializes_explicit_discovery_trigger_mode(self):
+        answer = ResearchAnswer(
+            question="英国申请焦虑方向有什么爆款素材？",
+            task_type="material",
+            conclusion="内部资料不足，需要外部发现。",
+            discovery_trigger_mode="ask_first",
+        )
+
+        self.assertEqual(model_to_dict(answer)["discovery_trigger_mode"], "ask_first")
+
     def test_normalize_question_removes_extra_spaces_and_punctuation(self):
         self.assertEqual(
             normalize_question("  英国留学， 申请焦虑！！ "),

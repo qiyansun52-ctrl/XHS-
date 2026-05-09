@@ -68,6 +68,6 @@ class ResearchAnswer(BaseModel):
     can_external_discover: bool = False
     discovery_trigger_reason: Optional[str] = None
     suggested_search_queries: List[str] = Field(default_factory=list)
-    discovery_trigger_mode: str = "ask_first"
+    discovery_trigger_mode: Optional[str] = None
     discovery_job_id: Optional[str] = None
     message: Optional[str] = None
