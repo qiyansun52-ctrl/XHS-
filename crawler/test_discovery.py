@@ -11,8 +11,114 @@ from discovery import (
     validate_external_candidate_ids,
 )
 import research_service
+from discovery_service import DiscoveryService
 from research_models import ResearchAnswer
 from research_service import model_to_dict
+
+
+class FakeResult:
+    def __init__(self, data=None):
+        self.data = data
+
+
+class FakeTable:
+    def __init__(self, name, client):
+        self.name = name
+        self.client = client
+        self.calls = []
+        self.insert_payload = None
+        self.update_payload = None
+
+    def insert(self, payload):
+        self.calls.append(("insert", payload))
+        self.insert_payload = payload
+        return self
+
+    def select(self, columns):
+        self.calls.append(("select", columns))
+        return self
+
+    def eq(self, column, value):
+        self.calls.append(("eq", column, value))
+        return self
+
+    def single(self):
+        self.calls.append(("single",))
+        return self
+
+    def order(self, column, desc=False):
+        self.calls.append(("order", column, desc))
+        return self
+
+    def update(self, payload):
+        self.calls.append(("update", payload))
+        self.update_payload = payload
+        return self
+
+    def execute(self):
+        self.calls.append(("execute",))
+        if self.insert_payload is not None:
+            return FakeResult(self.insert_payload)
+        if self.update_payload is not None:
+            return FakeResult([self.update_payload])
+        return FakeResult(self.client.responses.get(self.name, []))
+
+
+class FakeSupabase:
+    def __init__(self, responses=None):
+        self.responses = responses or {}
+        self.tables = []
+
+    def table(self, name):
+        table = FakeTable(name, self)
+        self.tables.append(table)
+        return table
+
+
+class DiscoveryServiceTests(unittest.TestCase):
+    def test_create_job_truncates_provided_queries_and_inserts_pending_job(self):
+        sb = FakeSupabase()
+        service = DiscoveryService(sb, max_queries=2)
+
+        job = service.create_job(
+            user_question="英国申请焦虑方向有什么爆款素材？",
+            task_type="material",
+            trigger_reason="user_requested",
+            internal_answer_payload={"conclusion": "内部资料不足"},
+            search_queries=["英国留学 焦虑", "英国申请 文书", "多余查询"],
+            benchmark_account_ids=["account-1"],
+            created_by_member_id="member-1",
+        )
+
+        self.assertEqual(job["search_queries"], ["英国留学 焦虑", "英国申请 文书"])
+        self.assertEqual(job["status"], "pending")
+        self.assertEqual(job["benchmark_account_ids"], ["account-1"])
+        self.assertEqual(sb.tables[0].name, "external_discovery_jobs")
+        self.assertEqual(sb.tables[0].insert_payload[0]["created_by_member_id"], "member-1")
+
+    def test_get_job_with_candidates_orders_candidates_by_score_desc(self):
+        sb = FakeSupabase({
+            "external_discovery_jobs": {"id": "job-1", "status": "pending"},
+            "external_discovery_candidates": [{"id": "candidate-1", "candidate_score": 0.8}],
+        })
+        service = DiscoveryService(sb)
+
+        result = service.get_job_with_candidates("job-1")
+
+        self.assertEqual(result["job"], {"id": "job-1", "status": "pending"})
+        self.assertEqual(result["candidates"], [{"id": "candidate-1", "candidate_score": 0.8}])
+        self.assertIn(("order", "candidate_score", True), sb.tables[1].calls)
+
+    def test_mark_candidate_review_writes_status_reason_and_reviewed_at(self):
+        sb = FakeSupabase()
+        service = DiscoveryService(sb)
+
+        candidate = service.mark_candidate_review("candidate-1", "rejected", "不相关")
+
+        self.assertEqual(candidate["review_status"], "rejected")
+        self.assertEqual(candidate["review_reason"], "不相关")
+        self.assertIn("reviewed_at", candidate)
+        self.assertIn(("eq", "id", "candidate-1"), sb.tables[0].calls)
 
 
 class DiscoveryHelperTests(unittest.TestCase):

@@ -32,6 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
 import voyageai
+from discovery_service import DiscoveryService
 from research_models import ResearchRequest
 from research_service import ResearchService
 
@@ -310,6 +311,10 @@ app.add_middleware(
 )
 
 research_service = ResearchService(sb, embed_texts)
+discovery_service = DiscoveryService(
+    sb,
+    max_queries=getattr(app_config, "EXTERNAL_DISCOVERY_MAX_QUERIES", 4),
+)
 
 
 def require_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
@@ -397,6 +402,20 @@ class SearchViralReq(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
 
 
+class CreateDiscoveryJobReq(BaseModel):
+    user_question: str = Field(..., min_length=1, max_length=1000)
+    task_type: str = Field(default="mixed")
+    trigger_reason: str = Field(default="user_requested")
+    internal_answer_payload: Dict[str, Any] = Field(default_factory=dict)
+    search_queries: List[str] = Field(default_factory=list)
+    benchmark_account_ids: List[str] = Field(default_factory=list)
+    created_by_member_id: Optional[str] = None
+
+
+class ReviewCandidateReq(BaseModel):
+    reason: Optional[str] = None
+
+
 @app.post("/ai/search-viral", dependencies=[Depends(require_api_key)])
 async def search_viral(req: SearchViralReq):
     """对爆款帖子做语义检索，返回相似度排序后的列表。"""
@@ -446,6 +465,56 @@ async def save_research_note(payload: Dict[str, Any]):
         raise HTTPException(500, "保存失败，请稍后重试。")
     rows = res.data or []
     return {"ok": True, "note": rows[0] if rows else None}
+
+
+@app.post("/ai/discovery-jobs", dependencies=[Depends(require_api_key)])
+async def create_discovery_job(req: CreateDiscoveryJobReq):
+    enabled = getattr(app_config, "EXTERNAL_DISCOVERY_ENABLED", False)
+    if not enabled:
+        raise HTTPException(400, "外部发现功能尚未开启")
+    try:
+        job = discovery_service.create_job(
+            user_question=req.user_question,
+            task_type=req.task_type,
+            trigger_reason=req.trigger_reason,
+            internal_answer_payload=req.internal_answer_payload,
+            search_queries=req.search_queries,
+            benchmark_account_ids=req.benchmark_account_ids,
+            created_by_member_id=req.created_by_member_id,
+        )
+        return {"ok": True, "job": job}
+    except Exception as e:
+        log.error(f"创建外部发现任务失败: {e}")
+        raise HTTPException(500, "创建外部发现任务失败，请稍后重试。")
+
+
+@app.get("/ai/discovery-jobs/{job_id}", dependencies=[Depends(require_api_key)])
+async def get_discovery_job(job_id: str):
+    try:
+        return discovery_service.get_job_with_candidates(job_id)
+    except Exception as e:
+        log.error(f"读取外部发现任务失败: {e}")
+        raise HTTPException(500, "读取外部发现任务失败，请稍后重试。")
+
+
+@app.post("/ai/discovery-candidates/{candidate_id}/ignore", dependencies=[Depends(require_api_key)])
+async def ignore_discovery_candidate(candidate_id: str):
+    try:
+        candidate = discovery_service.mark_candidate_review(candidate_id, "ignored")
+        return {"ok": True, "candidate": candidate}
+    except Exception as e:
+        log.error(f"忽略候选素材失败: {e}")
+        raise HTTPException(500, "操作失败，请稍后重试。")
+
+
+@app.post("/ai/discovery-candidates/{candidate_id}/reject", dependencies=[Depends(require_api_key)])
+async def reject_discovery_candidate(candidate_id: str, req: ReviewCandidateReq):
+    try:
+        candidate = discovery_service.mark_candidate_review(candidate_id, "rejected", req.reason or "不相关")
+        return {"ok": True, "candidate": candidate}
+    except Exception as e:
+        log.error(f"拒绝候选素材失败: {e}")
+        raise HTTPException(500, "操作失败，请稍后重试。")
 
 
 # ────────────────────────────────────────────────────────────────
