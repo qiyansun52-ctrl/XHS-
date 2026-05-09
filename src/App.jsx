@@ -245,7 +245,9 @@ export default function App() {
         {view === "accounts"  && <AccountsPage   accounts={accounts} members={members} onAccountsChange={setAccounts} />}
         {view === "calendar"  && <CalendarPage   accounts={accounts} members={members} />}
         {view === "material"  && <MaterialPage />}
-        {view === "ai"        && <AISearchPage />}
+        <div style={{ display: view === "ai" ? "block" : "none" }}>
+          <AISearchPage />
+        </div>
         {view === "analytics" && <AnalyticsPage  accounts={accounts} />}
       </div>
 

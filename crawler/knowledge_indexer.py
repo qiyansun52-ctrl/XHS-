@@ -176,7 +176,7 @@ def upsert_knowledge_item(sb, item: Dict[str, Any]) -> None:
         .maybe_single()
         .execute()
     )
-    current = existing.data
+    current = getattr(existing, "data", None)
     if current and current.get("content_hash") == item.get("content_hash"):
         if current.get("embed_status") != "failed":
             metadata = {

@@ -5,8 +5,53 @@ from knowledge_indexer import (
     build_benchmark_post_item,
     build_content_hash,
     build_team_post_item,
+    build_title_item,
     detect_language,
+    upsert_knowledge_item,
 )
+
+
+class FakeTable:
+    def __init__(self, client):
+        self.client = client
+        self.calls = []
+        self.upsert_payload = None
+
+    def select(self, columns):
+        self.calls.append(("select", columns))
+        return self
+
+    def eq(self, column, value):
+        self.calls.append(("eq", column, value))
+        return self
+
+    def maybe_single(self):
+        self.calls.append(("maybe_single",))
+        return self
+
+    def upsert(self, payload, on_conflict=None):
+        self.calls.append(("upsert", payload, on_conflict))
+        self.upsert_payload = payload
+        self.client.upserts.append((payload, on_conflict))
+        return self
+
+    def execute(self):
+        self.calls.append(("execute",))
+        if self.upsert_payload is not None:
+            return None
+        return self.client.select_response
+
+
+class FakeSupabase:
+    def __init__(self, select_response=None):
+        self.select_response = select_response
+        self.upserts = []
+        self.tables = []
+
+    def table(self, name):
+        table = FakeTable(self)
+        self.tables.append((name, table))
+        return table
 
 
 class KnowledgeIndexerTests(unittest.TestCase):
@@ -72,6 +117,17 @@ class KnowledgeIndexerTests(unittest.TestCase):
         self.assertEqual(item["source_type"], "benchmark_account")
         self.assertTrue(item["is_active"])
         self.assertIn("怕错过DDL", item["content"])
+
+    def test_upsert_knowledge_item_handles_empty_maybe_single_response(self):
+        sb = FakeSupabase(select_response=None)
+        item = build_title_item({"id": "title-1", "title": "英国春天标题"})
+
+        upsert_knowledge_item(sb, item)
+
+        self.assertEqual(len(sb.upserts), 1)
+        payload, on_conflict = sb.upserts[0]
+        self.assertEqual(payload["source_type"], "title")
+        self.assertEqual(on_conflict, "source_type,source_key")
 
 
 if __name__ == "__main__":
