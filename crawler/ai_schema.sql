@@ -303,6 +303,20 @@ create table if not exists external_discovery_candidates (
   unique(job_id, url)
 );
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'external_discovery_candidates_approved_viral_post_id_fkey'
+      and conrelid = 'external_discovery_candidates'::regclass
+  ) then
+    alter table external_discovery_candidates
+      add constraint external_discovery_candidates_approved_viral_post_id_fkey
+      foreign key (approved_viral_post_id) references viral_posts(id) on delete set null;
+  end if;
+end $$;
+
 create index if not exists idx_external_discovery_candidates_job_score
   on external_discovery_candidates(job_id, candidate_score desc);
 
