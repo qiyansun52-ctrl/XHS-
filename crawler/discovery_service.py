@@ -104,7 +104,8 @@ class DiscoveryService:
                 .maybe_single()
                 .execute()
             )
-            return res.data
+            if res.data:
+                return res.data
 
         url = (candidate.get("url") or "").strip()
         if not url:

@@ -447,6 +447,47 @@ class DiscoveryServiceTests(unittest.TestCase):
         self.assertFalse(any(table.name == "viral_posts" and table.insert_payload for table in sb.tables))
         self.assertEqual(sb.upserts[0]["payload"]["source_id"], "viral-existing")
 
+    def test_approve_candidate_falls_back_to_url_when_note_id_lookup_misses(self):
+        candidate = {
+            "id": "candidate-1",
+            "review_status": "pending",
+            "url": "https://www.xiaohongshu.com/explore/note-1",
+            "xhs_note_id": "note-1",
+            "title": "新标题",
+            "caption": "新正文",
+            "tags": ["英国"],
+        }
+        existing_viral_post = {
+            "id": "viral-url-match",
+            "url": "https://www.xiaohongshu.com/explore/note-1",
+            "xhs_note_id": "old-note-id",
+            "title": "旧标题",
+            "fetch_status": "done",
+        }
+        approved_candidate = {
+            **candidate,
+            "review_status": "approved",
+            "approved_viral_post_id": "viral-url-match",
+        }
+        sb = FakeSupabase({
+            "external_discovery_candidates": candidate,
+            "knowledge_items": None,
+        })
+        sb.response_sequences["viral_posts"] = [None, existing_viral_post]
+        sb.update_responses["viral_posts"] = [{**existing_viral_post, "title": "新标题"}]
+        sb.update_responses["external_discovery_candidates"] = [approved_candidate]
+        service = DiscoveryService(sb)
+
+        result = service.approve_candidate("candidate-1")
+
+        self.assertEqual(result["approved_viral_post_id"], "viral-url-match")
+        viral_lookups = [table for table in sb.tables if table.name == "viral_posts" and table.update_payload is None]
+        self.assertIn(("eq", "xhs_note_id", "note-1"), viral_lookups[0].calls)
+        self.assertIn(("eq", "url", "https://www.xiaohongshu.com/explore/note-1"), viral_lookups[1].calls)
+        viral_update = next(table for table in sb.tables if table.name == "viral_posts" and table.update_payload)
+        self.assertIn(("eq", "id", "viral-url-match"), viral_update.calls)
+        self.assertFalse(any(table.name == "viral_posts" and table.insert_payload for table in sb.tables))
+
     def test_approve_candidate_raises_when_candidate_is_missing_or_already_reviewed(self):
         for row in (None, {"id": "candidate-1", "review_status": "ignored"}):
             with self.subTest(row=row):
