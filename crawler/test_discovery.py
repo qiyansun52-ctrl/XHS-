@@ -146,6 +146,27 @@ class FakeSignatureMismatchSearchClient:
         }
 
 
+class FakeInternalTypeErrorAfterSortFallbackClient:
+    def __init__(self):
+        self.calls = []
+
+    async def search_note(self, *args, **kwargs):
+        if args:
+            self.calls.append("positional")
+            return {
+                "items": [
+                    {"note_id": "masked-internal-error"}
+                ]
+            }
+
+        if "sort" in kwargs:
+            self.calls.append("sort")
+            raise TypeError("search_note() got an unexpected keyword argument 'sort'")
+
+        self.calls.append("keyword")
+        raise TypeError("internal parser failed")
+
+
 class XhsDiscoveryAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_adapter_uses_available_search_method(self):
         from xhs_discovery import search_keyword_notes
@@ -202,6 +223,15 @@ class XhsDiscoveryAdapterTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(rows[0]["note_id"], "fallback-1")
         self.assertEqual(client.calls, 2)
+
+    async def test_search_adapter_preserves_internal_type_error_after_sort_fallback(self):
+        from xhs_discovery import search_keyword_notes
+
+        client = FakeInternalTypeErrorAfterSortFallbackClient()
+        with self.assertRaisesRegex(TypeError, "internal parser failed"):
+            await search_keyword_notes(client, "澳洲申请", limit=5)
+
+        self.assertEqual(client.calls, ["sort", "keyword"])
 
 
 class DiscoveryServiceTests(unittest.TestCase):

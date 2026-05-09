@@ -77,7 +77,9 @@ async def search_keyword_notes(client, keyword: str, limit: int = 20) -> List[Di
                 raise
             try:
                 payload = await _maybe_await(method(keyword=keyword, page=1, page_size=limit))
-            except TypeError:
+            except TypeError as exc:
+                if not _is_signature_fallback_error(exc):
+                    raise
                 payload = await _maybe_await(method(keyword, 1, limit))
         return _extract_items(payload)[:limit]
 
