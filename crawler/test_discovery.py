@@ -50,6 +50,10 @@ class FakeTable:
         self.calls.append(("single",))
         return self
 
+    def maybe_single(self):
+        self.calls.append(("maybe_single",))
+        return self
+
     def order(self, column, desc=False):
         self.calls.append(("order", column, desc))
         return self
@@ -141,6 +145,8 @@ class DiscoveryServiceTests(unittest.TestCase):
             service.get_job_with_candidates("missing-job")
 
         self.assertEqual(str(ctx.exception), "外部发现任务不存在")
+        self.assertIn(("maybe_single",), sb.tables[0].calls)
+        self.assertNotIn(("single",), sb.tables[0].calls)
 
     def test_mark_candidate_review_writes_status_reason_and_reviewed_at(self):
         sb = FakeSupabase()

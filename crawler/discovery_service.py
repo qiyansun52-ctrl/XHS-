@@ -53,7 +53,7 @@ class DiscoveryService:
             self.sb.table("external_discovery_jobs")
             .select("*")
             .eq("id", job_id)
-            .single()
+            .maybe_single()
             .execute()
         )
         if not job_res.data:
