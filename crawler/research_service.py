@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 try:
     from openai import OpenAI
@@ -183,6 +184,10 @@ class ResearchService:
             cited_ids = set(material_references + team_history_references)
 
         cited_sources = [source for source in sources if source.id in cited_ids]
+        related_sources = [
+            KnowledgeSource(**self._source_shape(row))
+            for row in self._related_source_rows(req.question, retrieved_rows, cited_ids)
+        ]
         weak_titles = [
             str(row.get("title") or "")
             for row in retrieved_rows[:5]
@@ -208,7 +213,7 @@ class ResearchService:
             recommendations=validated.get("recommendations", []),
             material_references=material_references,
             team_history_references=team_history_references,
-            related_sources=sources,
+            related_sources=related_sources,
             cited_sources=cited_sources,
             image_analysis=image_analysis,
             general_advice=validated.get("general_advice", []),
@@ -683,6 +688,34 @@ class ResearchService:
         if not evidence_tokens:
             return rows[:max_count]
 
+        scored = self._score_evidence_rows(evidence_tokens, rows)
+        if not scored:
+            return rows[:max_count]
+
+        return [row for _, _, row in scored[:max_count]]
+
+    def _related_source_rows(
+        self,
+        question: str,
+        rows: List[Dict[str, Any]],
+        cited_ids: set,
+        max_count: int = 4,
+    ) -> List[Dict[str, Any]]:
+        remaining = [
+            row for row in rows
+            if str(row.get("id")) not in cited_ids
+        ]
+        evidence_tokens = self._evidence_tokens(question)
+        if not evidence_tokens:
+            return remaining[:max_count]
+
+        return [row for _, _, row in self._score_evidence_rows(evidence_tokens, remaining)[:max_count]]
+
+    def _score_evidence_rows(
+        self,
+        evidence_tokens: List[str],
+        rows: List[Dict[str, Any]],
+    ) -> List[tuple]:
         scored = []
         for index, row in enumerate(rows):
             title = str(row.get("title") or "").lower()
@@ -699,11 +732,8 @@ class ResearchService:
             if score:
                 scored.append((score, index, row))
 
-        if not scored:
-            return rows[:max_count]
-
         scored.sort(key=lambda item: (-item[0], item[1]))
-        return [row for _, _, row in scored[:max_count]]
+        return scored
 
     def _evidence_tokens(self, question: str) -> List[str]:
         cleaned = str(question or "").lower()
@@ -740,7 +770,7 @@ class ResearchService:
             "title": row.get("title") or "",
             "content": row.get("content") or "",
             "summary": row.get("summary"),
-            "source_url": row.get("source_url"),
+            "source_url": self._normalize_source_url(row),
             "country": row.get("country"),
             "tags": row.get("tags") or [],
             "image_urls": row.get("image_urls") or [],
@@ -751,3 +781,27 @@ class ResearchService:
             "similarity": row.get("similarity"),
             "rrf_score": row.get("rrf_score"),
         }
+
+    def _normalize_source_url(self, row: Dict[str, Any]) -> Optional[str]:
+        raw_url = str(row.get("source_url") or "").strip()
+        source_id = str(row.get("source_id") or "").strip()
+        source_type = row.get("source_type")
+
+        if not raw_url and source_type in ("viral_post", "benchmark_post") and source_id:
+            return f"https://www.xiaohongshu.com/explore/{source_id}"
+        if not raw_url:
+            return None
+
+        parsed = urlsplit(raw_url)
+        if not parsed.scheme and raw_url.startswith("www."):
+            parsed = urlsplit(f"https://{raw_url}")
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return None
+
+        host = parsed.netloc.lower()
+        if host.endswith("xiaohongshu.com") and parsed.path.startswith("/explore/"):
+            note_id = parsed.path.split("/explore/", 1)[1].split("/", 1)[0]
+            if note_id:
+                return f"https://www.xiaohongshu.com/explore/{note_id}"
+
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))

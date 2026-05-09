@@ -12,6 +12,7 @@ import {
   saveResearchNote,
 } from "../aiApi.js";
 import { inputStyle, useIsMobile } from "./shared.jsx";
+import ViralPostDrawer from "./ViralPostDrawer.jsx";
 
 const SOURCE_TYPE_LABELS = {
   viral_post: "爆款素材",
@@ -24,9 +25,53 @@ const SOURCE_TYPE_LABELS = {
   banned_word: "违禁词",
 };
 
-function SourceCard({ source }) {
+function hasValidUrl(url) {
+  return typeof url === "string" && /^https?:\/\//i.test(url);
+}
+
+function sourceToPost(source) {
+  const images = Array.isArray(source.image_urls) ? source.image_urls : [];
+  return {
+    id: source.id,
+    title: source.title,
+    caption: source.content || source.summary || "",
+    images,
+    cover_image: images[0],
+    likes: source.likes_count || 0,
+    saves: source.saves_count || 0,
+    comments: source.comments_count || 0,
+    views: source.views_count || 0,
+    url: hasValidUrl(source.source_url) ? source.source_url : null,
+    country: source.country,
+    tags: source.tags || [],
+    author_name: SOURCE_TYPE_LABELS[source.source_type] || source.source_type,
+  };
+}
+
+function SourceCard({ source, onOpen }) {
+  const canOpenDetails = Boolean(source.title || source.content || source.summary || source.image_urls?.length);
+  const canOpenUrl = hasValidUrl(source.source_url);
+
   return (
-    <div style={{ background: "#111", border: "1px solid #1e1e1e", borderRadius: 10, padding: 12 }}>
+    <div
+      onClick={canOpenDetails ? () => onOpen(source) : undefined}
+      role={canOpenDetails ? "button" : undefined}
+      tabIndex={canOpenDetails ? 0 : undefined}
+      onKeyDown={event => {
+        if (!canOpenDetails) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen(source);
+        }
+      }}
+      style={{
+        background: "#111",
+        border: "1px solid #1e1e1e",
+        borderRadius: 10,
+        padding: 12,
+        cursor: canOpenDetails ? "pointer" : "default",
+      }}
+    >
       <div style={{ fontSize: 11, color: "#FF2442", marginBottom: 6 }}>
         {SOURCE_TYPE_LABELS[source.source_type] || source.source_type}
       </div>
@@ -49,16 +94,38 @@ function SourceCard({ source }) {
         {source.saves_count != null && <span>藏 {source.saves_count}</span>}
         {source.country && <span>{source.country}</span>}
       </div>
-      {source.source_url && (
-        <a
-          href={source.source_url}
-          target="_blank"
-          rel="noreferrer"
-          style={{ display: "inline-block", marginTop: 10, fontSize: 11, color: "#54A0FF", textDecoration: "none" }}
-        >
-          打开原始链接
-        </a>
-      )}
+      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+        {canOpenDetails && (
+          <button
+            type="button"
+            onClick={event => {
+              event.stopPropagation();
+              onOpen(source);
+            }}
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "#FF9F43",
+              padding: 0,
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            查看详情
+          </button>
+        )}
+        {canOpenUrl && (
+          <a
+            href={source.source_url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={event => event.stopPropagation()}
+            style={{ display: "inline-block", fontSize: 11, color: "#54A0FF", textDecoration: "none" }}
+          >
+            打开原始链接
+          </a>
+        )}
+      </div>
     </div>
   );
 }
@@ -298,15 +365,30 @@ function ExternalSupplementCard({ supplement }) {
 }
 
 function AnswerView({ answer, onSave, savingNote, isMobile }) {
+  const [selectedSource, setSelectedSource] = useState(null);
+
   if (!answer) return null;
 
+  const citedIds = new Set((answer.cited_sources || []).map(source => source.id));
+  const relatedSources = (answer.related_sources || [])
+    .filter(source => !citedIds.has(source.id))
+    .slice(0, 4);
+
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.15fr) minmax(300px, 0.85fr)",
-      gap: 16,
-      alignItems: "start",
-    }}>
+    <>
+      {selectedSource && (
+        <ViralPostDrawer
+          post={sourceToPost(selectedSource)}
+          onClose={() => setSelectedSource(null)}
+        />
+      )}
+
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.15fr) minmax(300px, 0.85fr)",
+        gap: 16,
+        alignItems: "start",
+      }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {answer.message && (
           <div style={{
@@ -408,15 +490,22 @@ function AnswerView({ answer, onSave, savingNote, isMobile }) {
           <div style={{ fontSize: 11, color: "#555" }}>本次回答引用的素材</div>
           {(answer.cited_sources || []).length === 0
             ? <div style={{ fontSize: 12, color: "#333" }}>暂无引用来源</div>
-            : answer.cited_sources.map(source => <SourceCard key={source.id} source={source} />)}
+            : answer.cited_sources.map(source => (
+              <SourceCard key={source.id} source={source} onOpen={setSelectedSource} />
+            ))}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 11, color: "#555" }}>其他相关素材</div>
-          {(answer.related_sources || []).slice(0, 6).map(source => <SourceCard key={source.id} source={source} />)}
+          <div style={{ fontSize: 11, color: "#555" }}>其他精准匹配素材</div>
+          {relatedSources.length === 0
+            ? <div style={{ fontSize: 12, color: "#333" }}>暂无更多精准匹配素材</div>
+            : relatedSources.map(source => (
+              <SourceCard key={source.id} source={source} onOpen={setSelectedSource} />
+            ))}
         </div>
       </aside>
-    </div>
+      </div>
+    </>
   );
 }
 

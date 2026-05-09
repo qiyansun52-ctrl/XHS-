@@ -842,7 +842,80 @@ class ResearchReferenceTests(unittest.TestCase):
 
         self.assertEqual(answer.material_references, ["row-0", "row-1"])
         self.assertEqual([source.id for source in answer.cited_sources], ["row-0", "row-1"])
-        self.assertEqual(len(answer.related_sources), 5)
+        self.assertEqual([source.id for source in answer.related_sources], ["row-2", "row-3", "row-4"])
+
+    def test_related_sources_exclude_broad_non_evidence_matches(self):
+        rows = [
+            {
+                "id": "cited-spring",
+                "source_type": "viral_post",
+                "source_key": "cited-spring",
+                "title": "伦敦春天散步",
+                "content": "春日和樱花路线。",
+                "similarity": 0.9,
+            },
+            {
+                "id": "broad-uk",
+                "source_type": "viral_post",
+                "source_key": "broad-uk",
+                "title": "英国留学申请攻略",
+                "content": "只有英国申请信息，没有季节素材。",
+                "similarity": 0.88,
+            },
+            {
+                "id": "related-spring",
+                "source_type": "viral_post",
+                "source_key": "related-spring",
+                "title": "Spring in Richmond",
+                "content": "樱花和公园野餐。",
+                "similarity": 0.86,
+            },
+            {
+                "id": "broad-manchester",
+                "source_type": "benchmark_post",
+                "source_key": "broad-manchester",
+                "title": "拿下曼彻斯特大学",
+                "content": "英国学校 offer 复盘。",
+                "similarity": 0.84,
+            },
+        ]
+
+        class NarrowRelatedService(research_service.ResearchService):
+            async def retrieve(self, query, task_type):
+                return rows
+
+            async def generate_answer(self, question, task_type, rows, sparse, image_analysis):
+                return {
+                    "conclusion": "引用春天素材。",
+                    "recommendations": [
+                        {"text": "先参考伦敦春天散步。", "source_ids": ["cited-spring"]},
+                    ],
+                    "material_references": ["cited-spring"],
+                    "team_history_references": [],
+                    "image_analysis": None,
+                    "general_advice": [],
+                }
+
+        service = NarrowRelatedService(None, None)
+
+        answer = asyncio.run(service.research(ResearchRequest(question="帮我找一下英国春天标题素材")))
+
+        self.assertEqual([source.id for source in answer.cited_sources], ["cited-spring"])
+        self.assertEqual([source.id for source in answer.related_sources], ["related-spring"])
+
+    def test_source_shape_normalizes_xhs_links(self):
+        service = research_service.ResearchService(None, None)
+
+        source = service._source_shape({
+            "id": "row-1",
+            "source_type": "viral_post",
+            "source_id": "abc123",
+            "source_key": "row-1",
+            "title": "春天素材",
+            "source_url": "https://www.xiaohongshu.com/explore/abc123?xsec_token=stale&xsec_source=pc_search&source=unknown#comments",
+        })
+
+        self.assertEqual(source["source_url"], "https://www.xiaohongshu.com/explore/abc123")
 
     def test_keyword_candidates_filters_prompt_scaffold_tokens(self):
         sb = FakeSupabase({"knowledge_items": []})
