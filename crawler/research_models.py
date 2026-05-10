@@ -1,9 +1,10 @@
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
 TaskType = Literal["material", "experience", "image_reference", "mixed"]
+EvidenceQuality = Literal["empty", "weak", "strong"]
 
 
 class ImageAnalysis(BaseModel):
@@ -84,4 +85,7 @@ class ResearchAnswer(BaseModel):
     suggested_search_queries: List[str] = Field(default_factory=list)
     discovery_trigger_mode: Optional[str] = None
     discovery_job_id: Optional[str] = None
+    evidence_quality: EvidenceQuality = "strong"
+    trace_id: Optional[str] = None
+    retrieval_debug: Optional[Dict] = None
     message: Optional[str] = None

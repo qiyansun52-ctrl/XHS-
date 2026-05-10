@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -15,11 +16,18 @@ from research_models import ExternalSupplementAnswer, ImageAnalysis, KnowledgeSo
 from discovery import derive_search_queries, validate_external_candidate_ids
 from retrieval import (
     detect_task_type,
-    is_sparse_result,
     rrf_merge,
     tokenize_query,
     validate_citations,
 )
+from retrieval_pipeline import (
+    classify_sparse,
+    filter_candidates,
+    parse_query_fallback,
+    profile_for_intent,
+    select_evidence,
+)
+from research_trace import write_research_trace
 
 try:
     import config as app_config
@@ -108,6 +116,8 @@ class ResearchService:
 
     async def research(self, req: ResearchRequest) -> ResearchAnswer:
         task_type = detect_task_type(req.question, has_image=bool(req.image_url))
+        intent_payload = parse_query_fallback(req.question, has_image=bool(req.image_url))
+        profile = profile_for_intent(intent_payload.intent)
         image_analysis = None
         image_query = ""
         messages: List[str] = []
@@ -131,34 +141,49 @@ class ResearchService:
             req.previous_answer_summary or "",
             image_query,
         ] if part)
-        retrieved_rows = await self.retrieve(query=query, task_type=task_type)
-        sparse = is_sparse_result(
-            retrieved_rows,
-            min_similarity=AI_RESEARCH_MIN_SIMILARITY,
-            min_count=AI_RESEARCH_MIN_RESULTS,
+        retrieved_rows = await self._retrieve_for_research(
+            query=query,
+            task_type=task_type,
+            intent_payload=intent_payload,
         )
-        if sparse:
-            messages.append("内部资料匹配较少，以下建议包含少量通用创作建议。")
+        filtered = filter_candidates([retrieved_rows], profile)
+        selected = select_evidence(filtered.rows, profile)
+        evidence_quality = classify_sparse(selected.rows, profile)
+        sparse = evidence_quality != "strong"
 
-        try:
-            answer_payload = await self.generate_answer(
-                question=req.question,
-                task_type=task_type,
-                rows=retrieved_rows,
-                sparse=sparse,
-                image_analysis=image_analysis,
-            )
-        except Exception:
+        if evidence_quality == "empty":
+            messages.append("知识库没有匹配内容，建议先创建外部发现任务或补充素材入库。")
             answer_payload = self.generate_fallback_answer(
                 req.question,
                 task_type,
-                retrieved_rows,
-                sparse,
+                selected.rows,
+                True,
                 image_analysis,
             )
+        else:
+            if evidence_quality == "weak":
+                messages.append("内部资料匹配较少，仅基于筛选后的少量证据回答，建议继续外部发现补充。")
 
-        validated = validate_citations(answer_payload, retrieved_ids={str(row["id"]) for row in retrieved_rows})
-        sources = [KnowledgeSource(**self._source_shape(row)) for row in retrieved_rows]
+            try:
+                answer_payload = await self.generate_answer(
+                    question=req.question,
+                    task_type=task_type,
+                    rows=selected.rows,
+                    sparse=sparse,
+                    image_analysis=image_analysis,
+                )
+            except Exception:
+                answer_payload = self.generate_fallback_answer(
+                    req.question,
+                    task_type,
+                    selected.rows,
+                    sparse,
+                    image_analysis,
+                )
+
+        selected_ids = {str(row["id"]) for row in selected.rows}
+        validated = validate_citations(answer_payload, retrieved_ids=selected_ids)
+        sources = [KnowledgeSource(**self._source_shape(row)) for row in selected.rows]
         recommended_ids: List[str] = []
         for recommendation in validated.get("recommendations", []) or []:
             for source_id in recommendation.get("source_ids") or []:
@@ -186,11 +211,11 @@ class ResearchService:
         cited_sources = [source for source in sources if source.id in cited_ids]
         related_sources = [
             KnowledgeSource(**self._source_shape(row))
-            for row in self._related_source_rows(req.question, retrieved_rows, cited_ids)
+            for row in self._related_source_rows(req.question, filtered.rows, cited_ids)
         ]
         weak_titles = [
             str(row.get("title") or "")
-            for row in retrieved_rows[:5]
+            for row in (selected.rows or filtered.rows or retrieved_rows)[:5]
             if row.get("title")
         ]
         can_external_discover = bool(sparse and EXTERNAL_DISCOVERY_ENABLED)
@@ -201,10 +226,37 @@ class ResearchService:
             max_queries=EXTERNAL_DISCOVERY_MAX_QUERIES,
         ) if can_external_discover else []
         discovery_trigger_reason = (
-            ("zero_recall" if not retrieved_rows else "sparse_recall")
+            ("zero_recall" if evidence_quality == "empty" else "sparse_recall")
             if can_external_discover
             else None
         )
+        trace_payload = {
+            "user_question": req.question,
+            "intent": intent_payload.intent,
+            "retrieval_profile": profile.name,
+            "parser_payload": asdict(intent_payload),
+            "route_counts": {
+                "retrieved": len(retrieved_rows),
+                "filtered": len(filtered.rows),
+                "selected": len(selected.rows),
+            },
+            "top_candidates": [
+                {
+                    "id": str(row.get("id")),
+                    "source_type": row.get("source_type"),
+                    "title": row.get("title"),
+                    "similarity": row.get("similarity"),
+                    "rrf_score": row.get("rrf_score"),
+                }
+                for row in filtered.rows[:10]
+            ],
+            "selected_evidence_ids": [str(row["id"]) for row in selected.rows],
+            "dropped_counts": filtered.dropped_counts,
+            "evidence_quality": evidence_quality,
+            "generation_allowed": evidence_quality != "empty",
+            "answer_payload": validated,
+        }
+        trace_id = write_research_trace(self.sb, trace_payload)
 
         return ResearchAnswer(
             question=req.question,
@@ -223,23 +275,69 @@ class ResearchService:
             suggested_search_queries=suggested_search_queries,
             discovery_trigger_mode=EXTERNAL_DISCOVERY_TRIGGER_MODE if can_external_discover else None,
             discovery_job_id=None,
+            evidence_quality=evidence_quality,
+            trace_id=trace_id,
+            retrieval_debug={
+                "intent": intent_payload.intent,
+                "profile": profile.name,
+                "candidate_count": filtered.candidate_count,
+                "filtered_count": filtered.filtered_count,
+                "selected_count": len(selected.rows),
+                "dropped_counts": filtered.dropped_counts,
+                "top_similarity": filtered.top_similarity,
+                "overflow_ids": selected.overflow_ids,
+            },
             message=" ".join(messages) if messages else None,
         )
 
-    async def retrieve(self, query: str, task_type: str) -> List[Dict[str, Any]]:
+    async def _retrieve_for_research(
+        self,
+        query: str,
+        task_type: str,
+        intent_payload=None,
+    ) -> List[Dict[str, Any]]:
+        try:
+            return await self.retrieve(query=query, task_type=task_type, intent_payload=intent_payload)
+        except TypeError as exc:
+            if "intent_payload" in str(exc) or "unexpected keyword" in str(exc):
+                return await self.retrieve(query=query, task_type=task_type)
+            raise
+
+    async def retrieve(self, query: str, task_type: str, intent_payload=None) -> List[Dict[str, Any]]:
+        if intent_payload is None:
+            intent_payload = parse_query_fallback(query, has_image=task_type == "image_reference")
+        profile = profile_for_intent(intent_payload.intent)
         embeds = await self.embed_texts([query], input_type="query")
-        source_types = self._source_types_for_task(task_type)
-        vector_res = self.sb.rpc("match_knowledge_items", {
+        source_types = intent_payload.filters.source_type_preference or self._source_types_for_task(task_type)
+        rpc_params = {
             "query_embedding": embeds[0],
-            "match_count": 30,
+            "match_count": profile.vector_match_count,
             "source_types": source_types,
-            "country_filter": None,
-        }).execute()
+            "country_filter": intent_payload.filters.country,
+            "min_similarity": profile.absolute_floor,
+        }
+        try:
+            vector_res = self.sb.rpc("match_knowledge_items", rpc_params).execute()
+        except Exception as exc:
+            if not self._should_retry_without_min_similarity(exc):
+                raise
+            fallback_params = dict(rpc_params)
+            fallback_params.pop("min_similarity", None)
+            vector_res = self.sb.rpc("match_knowledge_items", fallback_params).execute()
         vector_rows = vector_res.data or []
 
         keyword_rows = self.keyword_candidates(query, source_types=source_types)
         merged = self._rerank_for_task(rrf_merge([vector_rows, keyword_rows]), task_type)
-        return merged[:20]
+        filtered = filter_candidates([merged], profile)
+        return filtered.rows[:20]
+
+    def _should_retry_without_min_similarity(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            "min_similarity" in message
+            or ("match_knowledge_items" in message and "does not exist" in message)
+            or ("schema cache" in message and "match_knowledge_items" in message)
+        )
 
     def keyword_candidates(self, query: str, source_types: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         tokens = self._keyword_tokens(query)

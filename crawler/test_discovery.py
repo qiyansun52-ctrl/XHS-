@@ -18,6 +18,7 @@ from ai_api import CreateDiscoveryJobReq, ReviewCandidateReq
 from discovery_service import DiscoveryService
 from research_models import ResearchAnswer, ResearchRequest
 from research_service import model_to_dict
+from retrieval_pipeline import parse_query_fallback
 
 
 class FakeResult:
@@ -109,6 +110,18 @@ class FakeTable:
         return FakeResult(self.client.responses.get(self.name, []))
 
 
+class FakeRpc:
+    def __init__(self, name, params, client):
+        self.name = name
+        self.params = params
+        self.client = client
+
+    def execute(self):
+        if self.client.rpc_errors:
+            raise self.client.rpc_errors.pop(0)
+        return FakeResult(self.client.responses.get(self.name, []))
+
+
 class FakeSupabase:
     def __init__(self, responses=None):
         self.responses = responses or {}
@@ -119,11 +132,17 @@ class FakeSupabase:
         self.upsert_responses = {}
         self.upserts = []
         self.tables = []
+        self.rpc_calls = []
+        self.rpc_errors = []
 
     def table(self, name):
         table = FakeTable(name, self)
         self.tables.append(table)
         return table
+
+    def rpc(self, name, params):
+        self.rpc_calls.append((name, params))
+        return FakeRpc(name, params, self)
 
 
 class FakeSearchClient:
@@ -938,6 +957,199 @@ class ResearchReferenceTests(unittest.TestCase):
         self.assertNotIn("帮我", clauses)
         self.assertNotIn("标题", clauses)
         self.assertNotIn("素材", clauses)
+
+    def test_retrieve_passes_min_similarity_and_filters_rpc_tail(self):
+        async def fake_embed(texts, input_type="query"):
+            return [[0.1, 0.2, 0.3]]
+
+        sb = FakeSupabase({
+            "match_knowledge_items": [
+                {
+                    "id": "strong",
+                    "source_type": "viral_post",
+                    "source_key": "strong",
+                    "title": "英国春天素材",
+                    "content": "伦敦春日樱花",
+                    "similarity": 0.80,
+                },
+                {
+                    "id": "weak-tail",
+                    "source_type": "viral_post",
+                    "source_key": "weak-tail",
+                    "title": "英国申请",
+                    "content": "泛英国申请信息",
+                    "similarity": 0.20,
+                },
+            ],
+            "knowledge_items": [],
+        })
+        service = research_service.ResearchService(sb, fake_embed)
+        intent_payload = parse_query_fallback("帮我找一下有关于英国春天的标题素材")
+
+        rows = asyncio.run(service.retrieve(
+            "帮我找一下有关于英国春天的标题素材",
+            "material",
+            intent_payload=intent_payload,
+        ))
+
+        self.assertEqual([row["id"] for row in rows], ["strong"])
+        self.assertEqual(sb.rpc_calls[0][0], "match_knowledge_items")
+        self.assertIn("min_similarity", sb.rpc_calls[0][1])
+        self.assertEqual(sb.rpc_calls[0][1]["country_filter"], "英国")
+
+    def test_retrieve_falls_back_when_deployed_rpc_has_old_signature(self):
+        async def fake_embed(texts, input_type="query"):
+            return [[0.1, 0.2, 0.3]]
+
+        sb = FakeSupabase({
+            "match_knowledge_items": [
+                {
+                    "id": "strong",
+                    "source_type": "viral_post",
+                    "source_key": "strong",
+                    "title": "英国春天素材",
+                    "content": "伦敦春日樱花",
+                    "similarity": 0.80,
+                },
+            ],
+            "knowledge_items": [],
+        })
+        sb.rpc_errors.append(Exception("function match_knowledge_items(min_similarity) does not exist"))
+        service = research_service.ResearchService(sb, fake_embed)
+
+        rows = asyncio.run(service.retrieve(
+            "英国春天标题素材",
+            "material",
+            intent_payload=parse_query_fallback("英国春天标题素材"),
+        ))
+
+        self.assertEqual([row["id"] for row in rows], ["strong"])
+        self.assertEqual(len(sb.rpc_calls), 2)
+        self.assertIn("min_similarity", sb.rpc_calls[0][1])
+        self.assertNotIn("min_similarity", sb.rpc_calls[1][1])
+
+    def test_research_empty_evidence_does_not_call_llm(self):
+        class EmptyEvidenceService(research_service.ResearchService):
+            async def retrieve(self, query, task_type):
+                return []
+
+            async def generate_answer(self, question, task_type, rows, sparse, image_analysis):
+                raise AssertionError("LLM should not be called without evidence")
+
+        sb = FakeSupabase()
+        service = EmptyEvidenceService(sb, None)
+
+        answer = asyncio.run(service.research(ResearchRequest(question="英国春天标题素材")))
+
+        self.assertEqual(answer.conclusion, "知识库中没有匹配内容。")
+        self.assertEqual(answer.evidence_quality, "empty")
+        self.assertTrue(answer.sparse)
+        self.assertEqual(answer.cited_sources, [])
+
+    def test_research_only_allows_selected_evidence_as_citations(self):
+        rows = [
+            {
+                "id": "selected",
+                "source_type": "viral_post",
+                "source_key": "selected",
+                "title": "伦敦春天素材",
+                "content": "春日樱花和公园野餐。",
+                "similarity": 0.82,
+            },
+            {
+                "id": "filtered-tail",
+                "source_type": "viral_post",
+                "source_key": "filtered-tail",
+                "title": "英国申请泛内容",
+                "content": "没有春天细节。",
+                "similarity": 0.20,
+            },
+        ]
+
+        class SelectedEvidenceService(research_service.ResearchService):
+            def __init__(self):
+                super().__init__(FakeSupabase(), None)
+                self.seen_row_ids = []
+
+            async def retrieve(self, query, task_type):
+                return rows
+
+            async def generate_answer(self, question, task_type, rows, sparse, image_analysis):
+                self.seen_row_ids = [row["id"] for row in rows]
+                return {
+                    "conclusion": "只允许引用筛选后的素材。",
+                    "recommendations": [
+                        {"text": "参考春天素材。", "source_ids": ["selected", "filtered-tail"]},
+                    ],
+                    "material_references": ["selected", "filtered-tail"],
+                    "team_history_references": [],
+                    "image_analysis": None,
+                    "general_advice": [],
+                }
+
+        service = SelectedEvidenceService()
+
+        answer = asyncio.run(service.research(ResearchRequest(question="英国春天标题素材")))
+
+        self.assertEqual(service.seen_row_ids, ["selected"])
+        self.assertEqual(answer.material_references, ["selected"])
+        self.assertEqual([source.id for source in answer.cited_sources], ["selected"])
+        self.assertEqual(answer.evidence_quality, "weak")
+
+    def test_research_writes_trace_payload_best_effort(self):
+        rows = [
+            {
+                "id": "row-1",
+                "source_type": "viral_post",
+                "source_key": "row-1",
+                "title": "伦敦春天素材",
+                "content": "春日樱花和公园野餐。",
+                "similarity": 0.82,
+            },
+            {
+                "id": "row-2",
+                "source_type": "viral_post",
+                "source_key": "row-2",
+                "title": "英国春日标题",
+                "content": "花瓣和live图。",
+                "similarity": 0.78,
+            },
+            {
+                "id": "row-3",
+                "source_type": "topic",
+                "source_key": "row-3",
+                "title": "春天选题",
+                "content": "春天情绪选题。",
+                "similarity": 0.72,
+            },
+        ]
+
+        class TraceService(research_service.ResearchService):
+            async def retrieve(self, query, task_type):
+                return rows
+
+            async def generate_answer(self, question, task_type, rows, sparse, image_analysis):
+                return {
+                    "conclusion": "引用内部素材回答。",
+                    "recommendations": [
+                        {"text": "参考伦敦春天素材。", "source_ids": ["row-1"]},
+                    ],
+                    "material_references": ["row-1"],
+                    "team_history_references": [],
+                    "image_analysis": None,
+                    "general_advice": [],
+                }
+
+        sb = FakeSupabase()
+        service = TraceService(sb, None)
+
+        answer = asyncio.run(service.research(ResearchRequest(question="英国春天标题素材")))
+
+        self.assertIsNotNone(answer.trace_id)
+        trace_table = next(table for table in sb.tables if table.name == "research_traces")
+        self.assertEqual(trace_table.insert_payload["id"], answer.trace_id)
+        self.assertEqual(trace_table.insert_payload["evidence_quality"], "strong")
+        self.assertEqual(trace_table.insert_payload["selected_evidence_ids"], ["row-1", "row-2", "row-3"])
 
 
 class DiscoveryHelperTests(unittest.TestCase):

@@ -48,6 +48,35 @@ function sourceToPost(source) {
   };
 }
 
+function getEvidenceStatus(answer) {
+  const quality = answer?.evidence_quality || (answer?.sparse ? "weak" : "strong");
+  const styles = {
+    empty: {
+      label: "无可用内部证据",
+      description: "系统没有把弱相关素材塞进回答，建议创建外部发现任务或补充知识库。",
+      color: "#FF5C7A",
+      background: "rgba(255,36,66,0.08)",
+      border: "rgba(255,36,66,0.22)",
+    },
+    weak: {
+      label: "内部证据较少",
+      description: "本次回答只基于筛选后的少量素材，请结合外部发现或人工判断继续收敛。",
+      color: "#FF9F43",
+      background: "rgba(255,159,67,0.08)",
+      border: "rgba(255,159,67,0.22)",
+    },
+    strong: {
+      label: "内部证据充足",
+      description: "回答已限制在筛选后的高相关素材范围内生成。",
+      color: "#26DE81",
+      background: "rgba(38,222,129,0.06)",
+      border: "rgba(38,222,129,0.18)",
+    },
+  };
+
+  return styles[quality] || styles.strong;
+}
+
 function SourceCard({ source, onOpen }) {
   const canOpenDetails = Boolean(source.title || source.content || source.summary || source.image_urls?.length);
   const canOpenUrl = hasValidUrl(source.source_url);
@@ -369,6 +398,7 @@ function AnswerView({ answer, onSave, savingNote, isMobile }) {
 
   if (!answer) return null;
 
+  const evidenceStatus = getEvidenceStatus(answer);
   const citedIds = new Set((answer.cited_sources || []).map(source => source.id));
   const relatedSources = (answer.related_sources || [])
     .filter(source => !citedIds.has(source.id))
@@ -390,6 +420,26 @@ function AnswerView({ answer, onSave, savingNote, isMobile }) {
         alignItems: "start",
       }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{
+          background: evidenceStatus.background,
+          border: `1px solid ${evidenceStatus.border}`,
+          borderRadius: 10,
+          padding: 12,
+          color: evidenceStatus.color,
+          fontSize: 12,
+          lineHeight: 1.65,
+        }}>
+          <div style={{ fontWeight: 700, color: evidenceStatus.color, marginBottom: 2 }}>
+            {evidenceStatus.label}
+          </div>
+          <div>{evidenceStatus.description}</div>
+          {answer.trace_id && (
+            <div style={{ marginTop: 6, color: "#555", fontSize: 11 }}>
+              Trace {answer.trace_id.slice(0, 8)}
+            </div>
+          )}
+        </div>
+
         {answer.message && (
           <div style={{
             background: "rgba(255,159,67,0.08)",

@@ -180,11 +180,41 @@ alter table ai_research_feedback enable row level security;
 drop policy if exists "team_access" on ai_research_feedback;
 create policy "team_access" on ai_research_feedback for all using (true) with check (true);
 
+create table if not exists research_traces (
+  id uuid primary key default gen_random_uuid(),
+  user_question text not null default '',
+  intent text not null default '',
+  retrieval_profile text not null default '',
+  parser_payload jsonb not null default '{}'::jsonb,
+  route_counts jsonb not null default '{}'::jsonb,
+  top_candidates jsonb not null default '[]'::jsonb,
+  selected_evidence_ids text[] not null default '{}',
+  dropped_counts jsonb not null default '{}'::jsonb,
+  evidence_quality text not null default 'empty' check (evidence_quality in ('empty', 'weak', 'strong')),
+  generation_allowed boolean not null default false,
+  answer_payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_research_traces_created_at
+  on research_traces(created_at desc);
+
+create index if not exists idx_research_traces_evidence_quality
+  on research_traces(evidence_quality, created_at desc);
+
+alter table research_traces enable row level security;
+drop policy if exists "team_access" on research_traces;
+create policy "team_access" on research_traces for all using (true) with check (true);
+
+drop function if exists match_knowledge_items(vector, integer, text[], text);
+drop function if exists match_knowledge_items(vector, integer, text[], text, float);
+
 create or replace function match_knowledge_items(
   query_embedding vector(512),
   match_count integer default 30,
   source_types text[] default null,
-  country_filter text default null
+  country_filter text default null,
+  min_similarity float default null
 )
 returns table (
   id uuid,
@@ -241,6 +271,7 @@ language sql stable as $$
     and k.embedding is not null
     and (source_types is null or k.source_type = any(source_types))
     and (country_filter is null or k.country = country_filter)
+    and (min_similarity is null or (1 - (k.embedding <=> query_embedding)) >= min_similarity)
   order by k.embedding <=> query_embedding
   limit match_count
 $$;
