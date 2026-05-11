@@ -5,8 +5,6 @@ Real-time content operations dashboard for a multi-account Xiaohongshu (RedNote)
 
 > Status: working prototype in active use by a 4–8 person content team. No public demo (data is private and the crawler requires a logged-in XHS session). 开发中，无公开 demo。
 
-<!-- TODO: add screenshots of accounts page, content kanban, analytics, AI search drawer -->
-
 ---
 
 ## Why this exists / 项目背景
@@ -144,13 +142,13 @@ python ai_api.py                       # FastAPI on 127.0.0.1:8001
 - **No router, no CSS framework, no TypeScript.** Deliberate: keeps ~4k lines of JSX approachable for non-frontend-leaning contributors. Trade-off accepted.
 - **UUID-first upload.** `crypto.randomUUID()` generates post IDs client-side so images can land in `post-images/{post_id}/` before the row exists. Avoids the row-vs-storage ordering problem.
 - **JSONB for nested data.** `benchmark_accounts.recent_posts` is a JSONB array — adding fields (caption, tags, images) never required a migration.
-- **`getWeekly()` is currently pseudo-random.** Placeholder visualization on cards where a real 7-day series isn't yet wired up; the history tables back the real charts on the analytics page. Will be replaced — flagged here for honesty.
+- **`getWeekly()` currently returns pseudo-random data** on per-card mini-trends where the real 7-day series isn't yet wired up. The full-fidelity charts on the analytics page are backed by the real history tables. Flagged here for honesty.
 
 ## Status / Roadmap
 
 - Working: full CRUD on posts/accounts/members; multi-image upload; calendar; viral & benchmark library; analytics charts; image rehosting; auto-restart crawler; AI search over saved viral posts.
 - Active: external-discovery loop (gated behind `EXTERNAL_DISCOVERY_ENABLED`, defaults to `ask_first` for human review).
-- Planned: replace `getWeekly()` placeholder with real per-card 7-day series; broader test coverage on the retrieval pipeline; lightweight role-based access if the team scales past ~10.
+- Planned: wire `getWeekly()` to the real per-card 7-day history series; broader test coverage on the retrieval pipeline; lightweight role-based access if the team scales past ~10.
 
 ## License
 
