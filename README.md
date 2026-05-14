@@ -144,9 +144,20 @@ chmod +x setup_autostart.sh
 tail -f logs/server.log          # verify "✅ XHS 客户端初始化成功"
 ```
 
-**Optional AI external discovery loop**
+**Optional AI search and operations assistant**
 
-After the core schema is installed, run `crawler/ai_schema.sql` in Supabase SQL Editor. Once crawler login is validated, set `EXTERNAL_DISCOVERY_ENABLED = True` in `crawler/config.py`, keep `EXTERNAL_DISCOVERY_TRIGGER_MODE = "ask_first"` until crawl quality is reviewed, then start both `crawler/server.py` and `crawler/ai_api.py`. In AI Search, ask a sparse question, click `去小红书找参考`, review candidates, and approve useful items.
+After the core schema is installed, run `crawler/ai_schema.sql` in Supabase SQL Editor and start `crawler/ai_api.py` next to the normal crawler. The AI page has two modes: classic search (`AISearchPage`) and the operations assistant (`AgentPage`). Keep `VITE_AGENT_RUNTIME_ENABLED=true` / `AGENT_RUNTIME_ENABLED=True` to show the assistant mode, or set either flag to false while rolling it out.
+
+For the external discovery loop, validate crawler login first, set `EXTERNAL_DISCOVERY_ENABLED = True` in `crawler/config.py`, and keep `EXTERNAL_DISCOVERY_TRIGGER_MODE = "ask_first"` until crawl quality is reviewed. In AI Search, ask a sparse question, click `去小红书找参考`, review candidates, and approve useful items.
+
+Useful checks:
+
+```bash
+npm run build
+npm run test:frontend
+npm run test:ai
+npm run test:agent
+```
 
 ### Design choices worth calling out
 
@@ -287,9 +298,20 @@ chmod +x setup_autostart.sh
 tail -f logs/server.log          # 看到 "✅ XHS 客户端初始化成功" 即可
 ```
 
-**可选：AI 外部发现闭环**
+**可选：AI 搜索与运营助手**
 
-核心 schema 执行完成后，在 Supabase SQL Editor 中继续执行 `crawler/ai_schema.sql`。确认爬虫登录态可用后，在 `crawler/config.py` 中设置 `EXTERNAL_DISCOVERY_ENABLED = True`，并先保持 `EXTERNAL_DISCOVERY_TRIGGER_MODE = "ask_first"`，等人工确认抓取质量后再调整。然后同时启动 `crawler/server.py` 和 `crawler/ai_api.py`，在 AI Search 里提一个信息较少的问题，点击 `去小红书找参考`，检查候选结果并批准有用素材。
+核心 schema 执行完成后，在 Supabase SQL Editor 中继续执行 `crawler/ai_schema.sql`，并在常规爬虫之外启动 `crawler/ai_api.py`。AI 页面有两个模式：经典搜索（`AISearchPage`）和运营助手（`AgentPage`）。保留 `VITE_AGENT_RUNTIME_ENABLED=true` / `AGENT_RUNTIME_ENABLED=True` 会展示运营助手模式；灰度期间可把任一开关设为 false。
+
+外部发现闭环需要先确认爬虫登录态可用，再在 `crawler/config.py` 中设置 `EXTERNAL_DISCOVERY_ENABLED = True`，并先保持 `EXTERNAL_DISCOVERY_TRIGGER_MODE = "ask_first"`，等人工确认抓取质量后再调整。在 AI Search 里提一个信息较少的问题，点击 `去小红书找参考`，检查候选结果并批准有用素材。
+
+常用检查：
+
+```bash
+npm run build
+npm run test:frontend
+npm run test:ai
+npm run test:agent
+```
 
 ### 值得一提的设计取舍
 

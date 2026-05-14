@@ -12,23 +12,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run dev       # 本地开发服务器（Vite，热更新）
 npm run build     # 生产构建，输出到 dist/
 npm run preview   # 预览构建产物
+npm run test:frontend  # 前端 AI helper 测试
+npm run test:ai        # AI 检索 / 发现 / indexer 后端单测
+npm run test:agent     # Agent runtime 后端单测
 ```
 
 环境变量需在 `.env` 中配置：
 ```
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
+VITE_AI_API_URL=http://127.0.0.1:8001
+VITE_AI_API_KEY=...
+VITE_AGENT_RUNTIME_ENABLED=true
 ```
 
 ## 架构概览
 
 ### 页面路由（无路由库）
 
-`App.jsx` 通过 `useState("accounts")` 控制当前视图，四个页面：
+`App.jsx` 通过 `useState("accounts")` 控制当前视图，六个页面：
 - `"accounts"` → `AccountsPage`
 - `"content"` → `ContentManager`
 - `"calendar"` → `CalendarPage`
 - `"material"` → `MaterialPage`
+- `"ai"` → `AISearchPage` / `AgentPage`（页面内用 `aiMode` 切换）
+- `"analytics"` → `AnalyticsPage`
 
 导航组件（桌面侧边栏 / 手机底部 tab 栏）直接调用 `setView`。
 
@@ -37,6 +45,7 @@ VITE_SUPABASE_ANON_KEY=...
 - **accounts / members**：由 `App.jsx` 从 Supabase 加载，通过 props 向下传递。accounts 完全由数据库驱动，无硬编码兜底。
 - **posts**：各用到的页面自行加载（`ContentManager`、`AccountsPage`、`CalendarPage` 各自维护独立的 posts state）。
 - **素材库数据**（`benchmark_accounts` / `topics` / `titles` / `banned_words`）：`MaterialPage` 内各 Tab 组件自行加载，互不共享。
+- **AI 搜索 / Agent**：前端通过 `src/aiApi.js`、`src/agentApi.js` 调用 `crawler/ai_api.py`；共享配置由 `src/runtimeConfig.js` 读取。
 - **Realtime**：`App.jsx` 订阅 `accounts` 表；各页面订阅自己关心的表（目前主要是 `posts`）。
 
 ### 组件层级
@@ -50,6 +59,9 @@ App.jsx
 ├── ContentManager       帖子网格（3:4卡片）+ 新建帖子弹窗
 ├── CalendarPage         月视图日历（桌面）/ 日期列表（手机）
 ├── MaterialPage         素材库，4个 Tab（对标账号/选题/标题/违禁词）
+├── AISearchPage         AI 搜索中心（素材检索、外部发现、研究笔记）
+├── AgentPage            运营助手（任务创建、进度记录、最终回答）
+├── AnalyticsPage        数据监控
 └── PostDetailDrawer     帖子详情抽屉（多页面复用）
 ```
 
@@ -117,6 +129,10 @@ create policy "team_access" on [表名] for all using (true) with check (true);
 | `topics` | uuid | 素材库：选题方向，含 tag 字段 |
 | `titles` | uuid | 素材库：标题灵感 |
 | `banned_words` | uuid | 素材库：违禁词，word 字段唯一 |
+| `knowledge_items` | uuid | AI 统一知识索引，见 `crawler/ai_schema.sql` |
+| `ai_research_notes` | uuid | AI 搜索结论沉淀 |
+| `external_discovery_jobs` / `external_discovery_candidates` | uuid | AI 外部发现闭环 |
+| `agent_runs` / `agent_steps` / `tool_invocations` | uuid/text | Agent runtime 与 timeline |
 
 Storage bucket：`post-images`（public）
 
@@ -126,6 +142,14 @@ Storage bucket：`post-images`（public）
 - `import_stats.py` — 读取 MediaCrawler 导出 JSON，写入 `post_stats` 和 `account_stats_history`
 - `run.sh` — 本地一键运行（需先配置 `config.py`）
 - `.github/workflows/daily-crawl.yml` — GitHub Actions 每天北京时间 09:00 / 21:00 触发
+
+## AI 服务（`crawler/ai_api.py`）
+
+- 独立 FastAPI 服务，默认 `127.0.0.1:8001`
+- 主要端点：`/ai/research`、`/ai/research-notes`、`/ai/discovery-jobs`、`/agent/runs`
+- 依赖 `crawler/ai_schema.sql`、`VOYAGE_API_KEY`、`AI_API_KEY`
+- `OPENAI_API_KEY` 可选；不配置时会用检索结果生成保守 fallback 答案
+- Agent 模式由 `VITE_AGENT_RUNTIME_ENABLED` 和 `AGENT_RUNTIME_ENABLED` 控制
 
 ## 重要约束
 

@@ -29,9 +29,11 @@ sys.path.insert(0, CRAWLER_DIR)
 
 from fastapi import FastAPI, Header, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
 import voyageai
+from agent import AgentEventBus, AgentOrchestrator, AgentRunStore, ContentResearchSkill, PlanEngine, ToolInvoker
 from discovery_service import DiscoveryNotFoundError, DiscoveryService
 from research_models import ResearchRequest
 from research_service import ResearchService
@@ -48,6 +50,9 @@ AI_API_CORS_ORIGINS = getattr(app_config, "AI_API_CORS_ORIGINS", [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ])
+AGENT_RUNTIME_ENABLED = str(
+    getattr(app_config, "AGENT_RUNTIME_ENABLED", os.getenv("AGENT_RUNTIME_ENABLED", "true"))
+).lower() not in ("0", "false", "no")
 
 # ── 日志 ─────────────────────────────────────────────────────────
 os.makedirs(os.path.join(CRAWLER_DIR, "logs"), exist_ok=True)
@@ -315,6 +320,31 @@ discovery_service = DiscoveryService(
     sb,
     max_queries=getattr(app_config, "EXTERNAL_DISCOVERY_MAX_QUERIES", 4),
 )
+agent_run_store = AgentRunStore(sb)
+agent_event_bus = AgentEventBus()
+agent_tool_invoker = ToolInvoker(agent_run_store)
+agent_plan_engine = PlanEngine(agent_run_store)
+
+
+async def run_agent_research(payload: Dict[str, Any]) -> Dict[str, Any]:
+    answer = await research_service.research(ResearchRequest(
+        question=payload.get("question") or "",
+        image_url=payload.get("image_url"),
+    ))
+    if hasattr(answer, "model_dump"):
+        return answer.model_dump()
+    return answer.dict()
+
+
+agent_orchestrator = AgentOrchestrator(
+    run_store=agent_run_store,
+    event_bus=agent_event_bus,
+    tool_invoker=agent_tool_invoker,
+    planner=agent_plan_engine,
+    skills={
+        ContentResearchSkill.name: ContentResearchSkill(run_agent_research),
+    },
+)
 
 
 def require_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
@@ -416,6 +446,12 @@ class ReviewCandidateReq(BaseModel):
     reason: Optional[Literal["不相关", "低质量", "疑似广告", "重复素材", "不适合团队调性", "数据异常"]] = None
 
 
+class CreateAgentRunReq(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1000)
+    image_url: Optional[str] = None
+    member_id: Optional[str] = None
+
+
 @app.post("/ai/search-viral", dependencies=[Depends(require_api_key)])
 async def search_viral(req: SearchViralReq):
     """对爆款帖子做语义检索，返回相似度排序后的列表。"""
@@ -451,6 +487,49 @@ async def research(req: ResearchRequest):
     if hasattr(result, "model_dump"):
         return result.model_dump()
     return result.dict()
+
+
+@app.post("/agent/runs", dependencies=[Depends(require_api_key)])
+async def create_agent_run(req: CreateAgentRunReq):
+    if not AGENT_RUNTIME_ENABLED:
+        raise HTTPException(404, "运营助手暂未开启")
+
+    run = await agent_orchestrator.create_run(
+        user_message=req.message,
+        user_image_url=req.image_url,
+        member_id=req.member_id,
+    )
+    return {"ok": True, "run": run, "steps": []}
+
+
+@app.get("/agent/runs/{run_id}", dependencies=[Depends(require_api_key)])
+async def get_agent_run(run_id: str):
+    if not AGENT_RUNTIME_ENABLED:
+        raise HTTPException(404, "运营助手暂未开启")
+
+    snapshot = await agent_run_store.get_run_snapshot(run_id)
+    if not snapshot:
+        raise HTTPException(404, "运营助手任务不存在")
+    return snapshot
+
+
+@app.get("/agent/runs/{run_id}/events", dependencies=[Depends(require_api_key)])
+async def stream_agent_run_events(run_id: str):
+    if not AGENT_RUNTIME_ENABLED:
+        raise HTTPException(404, "运营助手暂未开启")
+
+    snapshot = await agent_run_store.get_run_snapshot(run_id)
+    if not snapshot:
+        raise HTTPException(404, "运营助手任务不存在")
+
+    return StreamingResponse(
+        agent_event_bus.stream_sse(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/ai/research-notes", dependencies=[Depends(require_api_key)])

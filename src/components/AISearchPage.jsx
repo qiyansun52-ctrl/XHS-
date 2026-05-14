@@ -11,6 +11,12 @@ import {
   research,
   saveResearchNote,
 } from "../aiApi.js";
+import {
+  buildDiscoveryJobPayload,
+  getDiscoveryPanelCopy,
+  getEvidenceQuality,
+  shouldAutoCreateDiscovery,
+} from "../aiDiscovery.js";
 import { inputStyle, useIsMobile } from "./shared.jsx";
 import ViralPostDrawer from "./ViralPostDrawer.jsx";
 
@@ -49,7 +55,7 @@ function sourceToPost(source) {
 }
 
 function getEvidenceStatus(answer) {
-  const quality = answer?.evidence_quality || (answer?.sparse ? "weak" : "strong");
+  const quality = getEvidenceQuality(answer);
   const styles = {
     empty: {
       label: "无可用内部证据",
@@ -593,6 +599,36 @@ export default function AISearchPage() {
     return publicUrl;
   };
 
+  const createDiscoveryForAnswer = useCallback(async (targetAnswer, { autoTriggered = false } = {}) => {
+    if (!targetAnswer) return;
+
+    const requestSeq = discoveryRequestSeqRef.current + 1;
+    discoveryRequestSeqRef.current = requestSeq;
+    supplementRequestSeqRef.current += 1;
+    activeDiscoveryJobIdRef.current = null;
+    setDiscoveryLoading(true);
+    setDiscoveryError("");
+    setExternalSupplement(null);
+    setSupplementLoading(false);
+    try {
+      const payload = buildDiscoveryJobPayload(targetAnswer, new Date().toISOString(), { autoTriggered });
+      const { job } = await createDiscoveryJob(payload);
+      if (discoveryRequestSeqRef.current !== requestSeq) return;
+      activeDiscoveryJobIdRef.current = job.id;
+      setDiscoveryJob(job);
+      setDiscoveryCandidates([]);
+      setExternalSupplement(null);
+    } catch (err) {
+      if (discoveryRequestSeqRef.current !== requestSeq) return;
+      const prefix = autoTriggered ? "知识库无可用证据，自动创建外部发现任务失败：" : "";
+      setDiscoveryError(prefix + (err.message || "创建外部发现任务失败，请稍后重试。"));
+    } finally {
+      if (discoveryRequestSeqRef.current === requestSeq) {
+        setDiscoveryLoading(false);
+      }
+    }
+  }, []);
+
   const handleSubmit = async () => {
     if (!question.trim()) {
       alert("请先输入问题");
@@ -620,6 +656,9 @@ export default function AISearchPage() {
       setReviewingCandidateId(null);
       setExternalSupplement(null);
       setSupplementLoading(false);
+      if (shouldAutoCreateDiscovery(result)) {
+        createDiscoveryForAnswer(result, { autoTriggered: true });
+      }
     } catch (err) {
       setError(err.message || "AI 服务暂时不可用，请稍后再试。");
     } finally {
@@ -638,38 +677,7 @@ export default function AISearchPage() {
   }, []);
 
   const handleCreateDiscovery = async () => {
-    if (!answer) return;
-
-    const requestSeq = discoveryRequestSeqRef.current + 1;
-    discoveryRequestSeqRef.current = requestSeq;
-    supplementRequestSeqRef.current += 1;
-    activeDiscoveryJobIdRef.current = null;
-    setDiscoveryLoading(true);
-    setDiscoveryError("");
-    setExternalSupplement(null);
-    setSupplementLoading(false);
-    try {
-      const { job } = await createDiscoveryJob({
-        user_question: answer.question,
-        task_type: answer.task_type || "mixed",
-        trigger_reason: answer.discovery_trigger_reason || "user_requested",
-        internal_answer_payload: answer,
-        search_queries: answer.suggested_search_queries?.length ? answer.suggested_search_queries : null,
-        benchmark_account_ids: [],
-      });
-      if (discoveryRequestSeqRef.current !== requestSeq) return;
-      activeDiscoveryJobIdRef.current = job.id;
-      setDiscoveryJob(job);
-      setDiscoveryCandidates([]);
-      setExternalSupplement(null);
-    } catch (err) {
-      if (discoveryRequestSeqRef.current !== requestSeq) return;
-      setDiscoveryError(err.message || "创建外部发现任务失败，请稍后重试。");
-    } finally {
-      if (discoveryRequestSeqRef.current === requestSeq) {
-        setDiscoveryLoading(false);
-      }
-    }
+    createDiscoveryForAnswer(answer);
   };
 
   const handleCreateSupplement = async () => {
@@ -774,7 +782,7 @@ export default function AISearchPage() {
     return () => window.clearInterval(timer);
   }, [discoveryJob?.id, discoveryJob?.status, refreshDiscoveryJob]);
 
-  const canCreateDiscovery = answer?.can_external_discover;
+  const discoveryPanelCopy = answer ? getDiscoveryPanelCopy(answer) : null;
   const discoveryStatusText = {
     pending: "等待开始",
     running: "正在发现",
@@ -856,7 +864,7 @@ export default function AISearchPage() {
               fontWeight: 700,
             }}
           >
-            {loading ? <Loader2 size={15} /> : <Send size={15} />}
+            {loading ? <Loader2 size={15} className="spin" /> : <Send size={15} />}
             {loading ? "研究中…" : "提问"}
           </button>
         </div>
@@ -899,7 +907,7 @@ export default function AISearchPage() {
 
       <AnswerView answer={answer} onSave={handleSave} savingNote={savingNote} isMobile={isMobile} />
 
-      {answer && canCreateDiscovery && (
+      {answer && discoveryPanelCopy && (
         <section style={{
           marginTop: 18,
           background: "linear-gradient(180deg, rgba(84,160,255,0.07), rgba(17,17,17,1) 42%)",
@@ -915,9 +923,11 @@ export default function AISearchPage() {
             flexDirection: isMobile ? "column" : "row",
           }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 6 }}>继续发现外部素材</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 6 }}>
+                {discoveryPanelCopy.title}
+              </div>
               <div style={{ fontSize: 12, color: "#777", lineHeight: 1.65 }}>
-                内部知识库已经回答完毕，可以基于本次问题继续创建外部发现任务，补充新的对标账号或内容线索。
+                {discoveryPanelCopy.description}
               </div>
               {answer.suggested_search_queries?.length > 0 && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
@@ -933,6 +943,11 @@ export default function AISearchPage() {
                       {query}
                     </span>
                   ))}
+                </div>
+              )}
+              {!answer.suggested_search_queries?.length && (
+                <div style={{ fontSize: 11, color: "#555", marginTop: 10 }}>
+                  未提供推荐搜索词时，后端会从当前问题自动派生爬虫搜索词。
                 </div>
               )}
             </div>
@@ -956,8 +971,8 @@ export default function AISearchPage() {
                 whiteSpace: "nowrap",
               }}
             >
-              {discoveryLoading ? <Loader2 size={15} /> : <Sparkles size={15} />}
-              {discoveryJob ? "重新发现" : "创建发现任务"}
+              {discoveryLoading ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
+              {discoveryJob ? "重新发现" : discoveryPanelCopy.buttonLabel}
             </button>
           </div>
 
@@ -1051,7 +1066,7 @@ export default function AISearchPage() {
                 fontWeight: 700,
               }}
             >
-              {supplementLoading ? <Loader2 size={15} /> : <Sparkles size={15} />}
+              {supplementLoading ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
               {supplementLoading ? "生成外部补充中…" : "生成待审核外部补充回答"}
             </button>
           )}

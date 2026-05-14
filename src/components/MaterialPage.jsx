@@ -275,11 +275,22 @@ function BenchmarkTab() {
                   {/* 操作 */}
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, flexShrink: 0 }}>
                     {row.xhs_url && (
-                      <a href={row.xhs_url} target="_blank" rel="noopener noreferrer" style={{ color: "#555", display: "flex", alignItems: "center" }}>
+                      <a
+                        href={row.xhs_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="打开对标账号主页"
+                        title="打开对标账号主页"
+                        style={{ color: "#555", display: "flex", alignItems: "center" }}
+                      >
                         <ExternalLink size={13} />
                       </a>
                     )}
-                    <button onClick={() => handleDelete(row.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 2 }}
+                    <button
+                      onClick={() => handleDelete(row.id)}
+                      aria-label="删除对标账号"
+                      title="删除对标账号"
+                      style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 2 }}
                       onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
                       onMouseLeave={e => e.currentTarget.style.color = "#333"}>
                       <Trash2 size={14} />
@@ -506,7 +517,11 @@ function TopicsTab() {
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                   <p style={{ fontSize: 13, color: "#ddd", lineHeight: 1.65, margin: 0, flex: 1 }}>{item.description}</p>
-                  <button onClick={() => handleDelete(item.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 2, flexShrink: 0 }}
+                  <button
+                    onClick={() => handleDelete(item.id)}
+                    aria-label="删除选题"
+                    title="删除选题"
+                    style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 2, flexShrink: 0 }}
                     onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
                     onMouseLeave={e => e.currentTarget.style.color = "#333"}>
                     <Trash2 size={14} />
@@ -621,7 +636,11 @@ function TitlesTab() {
             >
               <span style={{ flex: 1, fontSize: 13, color: "#ddd", lineHeight: 1.5 }}>{item.title}</span>
               <span style={{ fontSize: 11, color: "#333", flexShrink: 0 }}>{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
-              <button onClick={() => handleDelete(item.id)} style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 4, flexShrink: 0 }}
+              <button
+                onClick={() => handleDelete(item.id)}
+                aria-label="删除标题"
+                title="删除标题"
+                style={{ background: "none", border: "none", color: "#333", cursor: "pointer", padding: 4, flexShrink: 0 }}
                 onMouseEnter={e => e.currentTarget.style.color = "#FF4444"}
                 onMouseLeave={e => e.currentTarget.style.color = "#333"}>
                 <Trash2 size={14} />
@@ -665,6 +684,7 @@ function BannedWordsTab() {
   };
 
   const handleDelete = async (id) => {
+    if (!window.confirm("确定删除这个违禁词？")) return;
     const { error } = await supabase.from("banned_words").delete().eq("id", id);
     if (error) { alert("删除失败：" + error.message); return; }
     setItems(p => p.filter(i => i.id !== id));
@@ -700,7 +720,11 @@ function BannedWordsTab() {
                 background: "rgba(255,36,66,0.1)", border: "1px solid rgba(255,36,66,0.25)",
               }}>
                 <span style={{ fontSize: 13, color: "#FF2442", fontWeight: 500 }}>{item.word}</span>
-                <button onClick={() => handleDelete(item.id)} style={{
+                <button
+                  onClick={() => handleDelete(item.id)}
+                  aria-label="删除违禁词"
+                  title="删除违禁词"
+                  style={{
                   background: "none", border: "none", color: "rgba(255,36,66,0.5)",
                   cursor: "pointer", padding: 0, display: "flex", alignItems: "center",
                 }}
@@ -913,7 +937,14 @@ function ViralPostsTab() {
                   </div>
 
                   {/* 删除按钮 */}
-                  <button onClick={() => handleDelete(item.id)} style={{
+                  <button
+                    onClick={event => {
+                      event.stopPropagation();
+                      handleDelete(item.id);
+                    }}
+                    aria-label="删除收藏帖子"
+                    title="删除收藏帖子"
+                    style={{
                     position: "absolute", top: 6, right: 6,
                     background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%",
                     width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
@@ -944,7 +975,14 @@ function ViralPostsTab() {
                       )}
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ color: "#444", display: "flex" }}>
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="打开原帖"
+                        title="打开原帖"
+                        style={{ color: "#444", display: "flex" }}
+                      >
                         <ExternalLink size={12} />
                       </a>
                       <span style={{ fontSize: 10, color: "#333" }}>{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>

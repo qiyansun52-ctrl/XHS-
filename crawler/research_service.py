@@ -277,6 +277,7 @@ class ResearchService:
             discovery_job_id=None,
             evidence_quality=evidence_quality,
             trace_id=trace_id,
+            selected_source_ids=[str(row["id"]) for row in selected.rows],
             retrieval_debug={
                 "intent": intent_payload.intent,
                 "profile": profile.name,

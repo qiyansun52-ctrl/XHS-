@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { Suspense, lazy, useState, useEffect } from "react";
 import { FileText, Users2, CalendarDays, BookOpen, BarChart2, Plus, X, UserCircle, Sparkles } from "lucide-react";
 import { supabase } from "./supabase.js";
-import ContentManager  from "./components/ContentManager.jsx";
-import AccountsPage    from "./components/AccountsPage.jsx";
-import CalendarPage    from "./components/CalendarPage.jsx";
-import MaterialPage    from "./components/MaterialPage.jsx";
-import AnalyticsPage   from "./components/AnalyticsPage.jsx";
-import AISearchPage    from "./components/AISearchPage.jsx";
 import { ROLE_LABELS, inputStyle, useIsMobile } from "./components/shared.jsx";
+
+const ContentManager = lazy(() => import("./components/ContentManager.jsx"));
+const AccountsPage = lazy(() => import("./components/AccountsPage.jsx"));
+const CalendarPage = lazy(() => import("./components/CalendarPage.jsx"));
+const MaterialPage = lazy(() => import("./components/MaterialPage.jsx"));
+const AnalyticsPage = lazy(() => import("./components/AnalyticsPage.jsx"));
+const AISearchPage = lazy(() => import("./components/AISearchPage.jsx"));
+const AgentPage = lazy(() => import("./components/AgentPage.jsx"));
 
 const ACCOUNT_LIST_COLUMNS = [
   "id",
@@ -23,6 +25,20 @@ const ACCOUNT_LIST_COLUMNS = [
   "saves",
   "created_at",
 ].join(", ");
+
+
+function PageFallback({ isMobile }) {
+  return (
+    <div style={{ padding: isMobile ? 16 : 32 }}>
+      <div style={{
+        height: 90,
+        border: "1px solid #1e1e1e",
+        borderRadius: 12,
+        background: "linear-gradient(90deg, #101010, #161616, #101010)",
+      }} />
+    </div>
+  );
+}
 
 
 function JoinTeamModal({ onClose, onJoin }) {
@@ -102,9 +118,13 @@ function JoinTeamModal({ onClose, onJoin }) {
 export default function App() {
   const isMobile = useIsMobile();
   const [view, setView]         = useState("accounts");
+  const [aiMode, setAiMode]     = useState("classic");
+  const [hasOpenedAi, setHasOpenedAi] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [members, setMembers]   = useState([]);
   const [showJoin, setShowJoin] = useState(false);
+  const agentModeEnabled = String(import.meta.env.VITE_AGENT_RUNTIME_ENABLED || "true").toLowerCase() !== "false";
+  const shouldRenderAi = hasOpenedAi || view === "ai";
 
   useEffect(() => {
     loadAccounts();
@@ -114,6 +134,10 @@ export default function App() {
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, []);
+
+  useEffect(() => {
+    if (view === "ai") setHasOpenedAi(true);
+  }, [view]);
 
   const loadAccounts = async () => {
     const { data, error } = await supabase.from("accounts").select(ACCOUNT_LIST_COLUMNS).order("id");
@@ -140,8 +164,9 @@ export default function App() {
       background: "#0a0a0a", color: "#e0e0e0",
       minHeight: "100vh", display: "flex",
       flexDirection: isMobile ? "column" : "row",
-    }}>
+      }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } .spin { animation: spin 1s linear infinite; }`}</style>
 
       {/* ── Desktop sidebar ── */}
       {!isMobile && (
@@ -241,14 +266,53 @@ export default function App() {
         flex: 1, overflow: "auto",
         paddingBottom: isMobile ? "calc(60px + env(safe-area-inset-bottom))" : 0,
       }}>
-        {view === "content"   && <ContentManager accounts={accounts} members={members} />}
-        {view === "accounts"  && <AccountsPage   accounts={accounts} members={members} onAccountsChange={setAccounts} />}
-        {view === "calendar"  && <CalendarPage   accounts={accounts} members={members} />}
-        {view === "material"  && <MaterialPage />}
-        <div style={{ display: view === "ai" ? "block" : "none" }}>
-          <AISearchPage />
-        </div>
-        {view === "analytics" && <AnalyticsPage  accounts={accounts} />}
+        <Suspense fallback={<PageFallback isMobile={isMobile} />}>
+          {view === "content"   && <ContentManager accounts={accounts} members={members} />}
+          {view === "accounts"  && <AccountsPage   accounts={accounts} members={members} onAccountsChange={setAccounts} />}
+          {view === "calendar"  && <CalendarPage   accounts={accounts} members={members} />}
+          {view === "material"  && <MaterialPage />}
+          {shouldRenderAi && (
+            <div style={{ display: view === "ai" ? "block" : "none" }}>
+              <div style={{ padding: isMobile ? "12px 12px 0" : "20px 20px 0" }}>
+                <div style={{
+                  display: "inline-flex",
+                  gap: 8,
+                  padding: 4,
+                  background: "#0e0e0e",
+                  border: "1px solid #1e1e1e",
+                  borderRadius: 12,
+                }}>
+                  {[
+                    { key: "classic", label: "经典搜索" },
+                    ...(agentModeEnabled ? [{ key: "agent", label: "运营助手" }] : []),
+                  ].map(item => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setAiMode(item.key)}
+                      style={{
+                        border: "none",
+                        background: aiMode === item.key ? "rgba(255,36,66,0.12)" : "transparent",
+                        color: aiMode === item.key ? "#FF2442" : "#666",
+                        borderRadius: 9,
+                        padding: "9px 12px",
+                        fontSize: 12,
+                        fontWeight: aiMode === item.key ? 700 : 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {aiMode === "classic" && <AISearchPage />}
+              {aiMode === "agent" && agentModeEnabled && <AgentPage />}
+            </div>
+          )}
+          {view === "analytics" && <AnalyticsPage  accounts={accounts} />}
+        </Suspense>
       </div>
 
       {/* ── Mobile bottom tab bar ── */}

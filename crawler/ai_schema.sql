@@ -206,6 +206,81 @@ alter table research_traces enable row level security;
 drop policy if exists "team_access" on research_traces;
 create policy "team_access" on research_traces for all using (true) with check (true);
 
+create table if not exists agent_runs (
+  id uuid primary key default gen_random_uuid(),
+  user_message text not null,
+  user_image_url text,
+  member_id uuid,
+  status text not null check (status in ('planning', 'running', 'completed', 'failed')),
+  plan jsonb,
+  final_answer jsonb,
+  error_message text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+create index if not exists idx_agent_runs_status_updated_at
+  on agent_runs(status, updated_at desc);
+
+alter table agent_runs enable row level security;
+drop policy if exists "team_access" on agent_runs;
+create policy "team_access" on agent_runs for all using (true) with check (true);
+
+create table if not exists agent_steps (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references agent_runs(id) on delete cascade,
+  step_index integer not null,
+  step_type text not null check (step_type in ('plan', 'tool_call', 'answer', 'observation', 'decision')),
+  tool_name text,
+  status text not null default 'pending',
+  input_payload jsonb not null default '{}'::jsonb,
+  output_payload jsonb not null default '{}'::jsonb,
+  error_message text,
+  created_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+create index if not exists idx_agent_steps_run_step_index
+  on agent_steps(run_id, step_index);
+
+alter table agent_steps enable row level security;
+drop policy if exists "team_access" on agent_steps;
+create policy "team_access" on agent_steps for all using (true) with check (true);
+
+create table if not exists tool_invocations (
+  idempotency_key text primary key,
+  tool_name text not null,
+  input_hash text not null,
+  output_payload jsonb,
+  status text not null,
+  created_at timestamptz default now(),
+  completed_at timestamptz
+);
+
+alter table tool_invocations enable row level security;
+drop policy if exists "team_access" on tool_invocations;
+create policy "team_access" on tool_invocations for all using (true) with check (true);
+
+create table if not exists agent_question_cache (
+  question_hash text not null,
+  member_key text not null default 'anonymous',
+  last_run_id uuid references agent_runs(id) on delete set null,
+  last_intent jsonb not null default '{}'::jsonb,
+  last_evidence_quality text,
+  declined_external boolean not null default false,
+  hit_count integer not null default 1,
+  last_hit_at timestamptz default now(),
+  primary key (question_hash, member_key)
+);
+
+create index if not exists idx_agent_question_cache_last_hit
+  on agent_question_cache(last_hit_at desc);
+
+alter table agent_question_cache enable row level security;
+drop policy if exists "team_access" on agent_question_cache;
+create policy "team_access" on agent_question_cache for all using (true) with check (true);
+
 drop function if exists match_knowledge_items(vector, integer, text[], text);
 drop function if exists match_knowledge_items(vector, integer, text[], text, float);
 

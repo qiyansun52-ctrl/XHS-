@@ -1,16 +1,13 @@
-const BASE_URL = import.meta.env.VITE_AI_API_URL;
-const API_KEY = import.meta.env.VITE_AI_API_KEY;
+import { resolveAiApiConfig } from "./runtimeConfig.js";
 
 async function postJson(path, body) {
-  if (!BASE_URL || !API_KEY) {
-    throw new Error("AI API 未配置，请检查 .env 中的 VITE_AI_API_URL 和 VITE_AI_API_KEY");
-  }
+  const { baseUrl, apiKey } = resolveAiApiConfig();
 
-  const resp = await fetch(`${BASE_URL}${path}`, {
+  const resp = await fetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-API-Key": API_KEY,
+      "X-API-Key": apiKey,
     },
     body: JSON.stringify(body),
   });
@@ -51,13 +48,11 @@ export async function createDiscoverySupplement(jobId) {
 }
 
 export async function getDiscoveryJob(jobId) {
-  if (!BASE_URL || !API_KEY) {
-    throw new Error("AI API 未配置，请检查 .env 中的 VITE_AI_API_URL 和 VITE_AI_API_KEY");
-  }
+  const { baseUrl, apiKey } = resolveAiApiConfig();
 
-  const resp = await fetch(`${BASE_URL}/ai/discovery-jobs/${jobId}`, {
+  const resp = await fetch(`${baseUrl}/ai/discovery-jobs/${jobId}`, {
     method: "GET",
-    headers: { "X-API-Key": API_KEY },
+    headers: { "X-API-Key": apiKey },
   });
 
   if (!resp.ok) {

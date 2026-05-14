@@ -39,6 +39,7 @@ AI_API_KEY = "change-me-to-a-long-random-string"
 # AI API 监听地址（默认本地 8001，避免与其他服务冲突）
 AI_API_HOST = "127.0.0.1"
 AI_API_PORT = 8001
+AGENT_RUNTIME_ENABLED = True
 
 # 允许跨域的前端来源（开发 + 生产，按需增减）
 AI_API_CORS_ORIGINS = [

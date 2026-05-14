@@ -87,5 +87,6 @@ class ResearchAnswer(BaseModel):
     discovery_job_id: Optional[str] = None
     evidence_quality: EvidenceQuality = "strong"
     trace_id: Optional[str] = None
+    selected_source_ids: List[str] = Field(default_factory=list)
     retrieval_debug: Optional[Dict] = None
     message: Optional[str] = None

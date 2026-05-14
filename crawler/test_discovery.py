@@ -1150,6 +1150,7 @@ class ResearchReferenceTests(unittest.TestCase):
         self.assertEqual(trace_table.insert_payload["id"], answer.trace_id)
         self.assertEqual(trace_table.insert_payload["evidence_quality"], "strong")
         self.assertEqual(trace_table.insert_payload["selected_evidence_ids"], ["row-1", "row-2", "row-3"])
+        self.assertEqual(answer.selected_source_ids, ["row-1", "row-2", "row-3"])
 
 
 class DiscoveryHelperTests(unittest.TestCase):
