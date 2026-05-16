@@ -411,6 +411,71 @@ alter table external_discovery_jobs enable row level security;
 drop policy if exists "team_access" on external_discovery_jobs;
 create policy "team_access" on external_discovery_jobs for all using (true) with check (true);
 
+create table if not exists ai_conversations (
+  id uuid primary key default gen_random_uuid(),
+  title text not null default '新对话',
+  member_id uuid references members(id) on delete set null,
+  status text not null default 'active' check (status in ('active', 'archived')),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  archived_at timestamptz
+);
+
+create index if not exists idx_ai_conversations_updated_at
+  on ai_conversations(updated_at desc);
+
+alter table ai_conversations enable row level security;
+drop policy if exists "team_access" on ai_conversations;
+create policy "team_access" on ai_conversations for all using (true) with check (true);
+
+create table if not exists ai_messages (
+  id uuid primary key default gen_random_uuid(),
+  conversation_id uuid not null references ai_conversations(id) on delete cascade,
+  role text not null check (role in ('user', 'assistant', 'system', 'tool')),
+  message_type text not null check (message_type in (
+    'text',
+    'clarification',
+    'crawler_brief',
+    'answer',
+    'event',
+    'candidate_summary'
+  )),
+  content text not null default '',
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_ai_messages_conversation_created_at
+  on ai_messages(conversation_id, created_at);
+
+alter table ai_messages enable row level security;
+drop policy if exists "team_access" on ai_messages;
+create policy "team_access" on ai_messages for all using (true) with check (true);
+
+create table if not exists ai_conversation_context (
+  conversation_id uuid primary key references ai_conversations(id) on delete cascade,
+  latest_answer_payload jsonb not null default '{}'::jsonb,
+  latest_crawler_brief jsonb not null default '{}'::jsonb,
+  active_discovery_job_id uuid references external_discovery_jobs(id) on delete set null,
+  active_agent_run_id uuid references agent_runs(id) on delete set null,
+  selected_candidate_ids uuid[] not null default '{}',
+  pending_review_action_ids uuid[] not null default '{}',
+  updated_at timestamptz default now()
+);
+
+alter table ai_conversation_context enable row level security;
+drop policy if exists "team_access" on ai_conversation_context;
+create policy "team_access" on ai_conversation_context for all using (true) with check (true);
+
+alter table agent_runs
+  add column if not exists conversation_id uuid references ai_conversations(id) on delete set null;
+
+alter table agent_review_actions
+  add column if not exists conversation_id uuid references ai_conversations(id) on delete set null;
+
+alter table external_discovery_jobs
+  add column if not exists conversation_id uuid references ai_conversations(id) on delete set null;
+
 create table if not exists external_discovery_candidates (
   id uuid primary key default gen_random_uuid(),
   job_id uuid not null references external_discovery_jobs(id) on delete cascade,
