@@ -2,6 +2,7 @@ import asyncio
 import unittest
 
 from agent.conversation_store import ConversationStore
+from clarification_service import ClarificationService
 
 
 class FakeResult:
@@ -112,3 +113,47 @@ class ConversationStoreTests(unittest.IsolatedAsyncioTestCase):
         table_names = [name for name, payload in sb.inserts]
         self.assertIn("ai_conversations", table_names)
         self.assertIn("ai_messages", table_names)
+
+
+class ClarificationServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_broad_material_request_returns_option_groups(self):
+        service = ClarificationService(structured_completion=None)
+
+        result = await service.clarify_request("帮我找英国方面的素材")
+
+        self.assertTrue(result["needs_clarification"])
+        self.assertEqual(result["detected_country"], "英国")
+        self.assertEqual(result["option_groups"][0]["id"], "content_scene")
+        labels = [item["label"] for item in result["option_groups"][0]["options"]]
+        self.assertIn("生活类", labels)
+        self.assertIn("作业论文考试类", labels)
+
+    async def test_build_crawler_brief_merges_selections_and_free_text(self):
+        service = ClarificationService(structured_completion=None)
+
+        brief = await service.build_crawler_brief(
+            original_request="帮我找英国方面的素材",
+            selections={
+                "content_scene": ["life"],
+                "expression_type": ["experience", "emotion"],
+            },
+            free_text="不要机构广告，偏真实留学生日常",
+        )
+
+        self.assertFalse(brief["needs_clarification"])
+        self.assertEqual(brief["crawler_brief"]["country"], "英国")
+        self.assertIn("生活类", brief["crawler_brief"]["content_scenes"])
+        self.assertIn("经验型", brief["crawler_brief"]["expression_types"])
+        self.assertIn("机构广告", brief["crawler_brief"]["exclusions"])
+        self.assertGreaterEqual(len(brief["crawler_brief"]["search_queries"]), 3)
+
+    async def test_invalid_llm_payload_falls_back_to_deterministic_brief(self):
+        def invalid_completion(**kwargs):
+            return {"broken": True}
+
+        service = ClarificationService(structured_completion=invalid_completion)
+
+        result = await service.clarify_request("帮我找新加坡申请素材")
+
+        self.assertTrue(result["needs_clarification"])
+        self.assertEqual(result["detected_country"], "新加坡")
