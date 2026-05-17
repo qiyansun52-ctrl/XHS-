@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -486,6 +486,8 @@ export default function AIWorkbenchPage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [openingConversationId, setOpeningConversationId] = useState(null);
   const [refreshingDiscovery, setRefreshingDiscovery] = useState(false);
+  const discoveryRequestSeqRef = useRef(0);
+  const activeDiscoveryJobIdRef = useRef(null);
 
   const activeTitle = useMemo(
     () => getConversationTitle(activeConversation, messages),
@@ -524,15 +526,26 @@ export default function AIWorkbenchPage() {
     };
   }, []);
 
-  const refreshDiscovery = useCallback(async ({ quiet = false } = {}) => {
-    if (!discoveryJob?.id) return;
+  const refreshDiscovery = useCallback(async ({
+    quiet = false,
+    jobId = discoveryJob?.id,
+    expectedSeq = discoveryRequestSeqRef.current,
+  } = {}) => {
+    if (!jobId) return null;
     if (!quiet) setRefreshingDiscovery(true);
     try {
-      const payload = await getDiscoveryJob(discoveryJob.id);
+      const payload = await getDiscoveryJob(jobId);
+      if (discoveryRequestSeqRef.current !== expectedSeq || activeDiscoveryJobIdRef.current !== jobId) {
+        return null;
+      }
       setDiscoveryJob(payload.job);
       setCandidates(payload.candidates || []);
+      return payload.job;
     } catch (err) {
-      if (!quiet) setError(err.message || "刷新外部发现任务失败");
+      if (!quiet && discoveryRequestSeqRef.current === expectedSeq && activeDiscoveryJobIdRef.current === jobId) {
+        setError(err.message || "刷新外部发现任务失败");
+      }
+      return null;
     } finally {
       if (!quiet) setRefreshingDiscovery(false);
     }
@@ -540,13 +553,17 @@ export default function AIWorkbenchPage() {
 
   useEffect(() => {
     if (!discoveryJob?.id || !["pending", "running"].includes(discoveryJob.status)) return undefined;
+    const jobId = discoveryJob.id;
+    const expectedSeq = discoveryRequestSeqRef.current;
     const timer = window.setInterval(() => {
-      refreshDiscovery({ quiet: true }).catch(() => {});
+      refreshDiscovery({ quiet: true, jobId, expectedSeq }).catch(() => {});
     }, 5000);
     return () => window.clearInterval(timer);
   }, [discoveryJob?.id, discoveryJob?.status, refreshDiscovery]);
 
   function resetDiscoveryState() {
+    discoveryRequestSeqRef.current += 1;
+    activeDiscoveryJobIdRef.current = null;
     setDiscoveryJob(null);
     setCandidates([]);
     setReviewingCandidateId(null);
@@ -700,8 +717,12 @@ export default function AIWorkbenchPage() {
 
   async function startDiscovery() {
     if (!crawlerBrief || loading || isDiscoveryRunning) return;
+    const requestSeq = discoveryRequestSeqRef.current + 1;
+    discoveryRequestSeqRef.current = requestSeq;
+    activeDiscoveryJobIdRef.current = null;
     setLoading(true);
     setError("");
+    setRefreshingDiscovery(false);
     try {
       const jobResp = await createDiscoveryJob({
         user_question: crawlerBrief.goal || latestUserRequest || activeTitle,
@@ -712,11 +733,15 @@ export default function AIWorkbenchPage() {
         crawler_brief: crawlerBrief,
         conversation_id: activeConversation?.id || null,
       });
+      if (discoveryRequestSeqRef.current !== requestSeq) return;
+      activeDiscoveryJobIdRef.current = jobResp.job.id;
       setDiscoveryJob(jobResp.job);
       setCandidates([]);
       toast("已启动精准发现");
     } catch (err) {
-      setError(err.message || "启动外部发现失败");
+      if (discoveryRequestSeqRef.current === requestSeq) {
+        setError(err.message || "启动外部发现失败");
+      }
     } finally {
       setLoading(false);
     }
