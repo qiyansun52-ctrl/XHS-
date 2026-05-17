@@ -1,7 +1,7 @@
 # AI Workbench Clarifying Crawler Design
 
 Date: 2026-05-17
-Status: Approved for planning
+Status: Implemented and verified
 
 ## Context
 
@@ -351,3 +351,30 @@ These are engineering choices for the implementation plan, not product blockers:
 - Whether to implement conversation streaming with SSE from the start or use polling first.
 - Whether to store brief fields directly on `external_discovery_jobs` or in a linked `crawler_briefs` table.
 - Whether old `ai_research_notes` should remain separate or be linked to conversations.
+
+## Implementation Record
+
+Implemented on branch `codex/product-ai-polish`.
+
+What shipped:
+
+- Durable AI conversations, messages, and conversation context with Supabase persistence and in-memory fallback.
+- LLM-backed clarification service with deterministic fallback option groups and crawler brief generation.
+- Conversation-scoped API endpoints for creating/listing conversations, clarifying a request, and generating crawler briefs.
+- Brief-aware discovery job creation, crawler brief fields on jobs, and `partial` discovery status for usable-but-incomplete crawls.
+- Unified AI Workbench UI with conversation history, chat, clarification chips, crawler brief confirmation, discovery status, and candidate approval.
+- Shared discovery candidate review card reused by the legacy AI search page and the new workbench.
+
+Verification run:
+
+- `npm run test:ai`: 83 tests passed.
+- `npm run test:agent`: 19 tests passed.
+- `cd crawler && python3 -m unittest test_workbench.py`: 18 tests passed.
+- `npm run test:frontend`: 15 tests passed.
+- `npm run build`: Vite production build passed.
+- `git diff --check`: passed with no whitespace errors.
+
+Supabase migration note:
+
+- Project SQL editor: `https://supabase.com/dashboard/project/nlsgqlkqimedgftkmzxn/sql/new`
+- Run the updated `crawler/ai_schema.sql` sections for `ai_conversations`, `ai_messages`, `ai_conversation_context`, the `conversation_id` link columns, `external_discovery_jobs` crawler brief fields, and the updated `partial` status check constraint.

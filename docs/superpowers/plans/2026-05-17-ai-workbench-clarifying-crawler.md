@@ -1980,3 +1980,31 @@ Expected:
 - Scope:
   - First version excludes multi-user project management, prompt library management, and LLM reranking.
   - Existing AI search and Agent pages remain available in source files during migration.
+
+## Execution Record
+
+Implemented on branch `codex/product-ai-polish`.
+
+Completed implementation commits include:
+
+- `feat(ai): add conversation store`
+- `feat(ai): add crawler clarification service`
+- `feat(ai): add conversation workbench api`
+- `feat(crawler): support clarified briefs and partial jobs`
+- `feat(ui): add ai workbench client helpers`
+- `feat(ui): add unified ai workbench`
+- Follow-up hardening fixes for clarification model config, crawler brief validation, frontend message ordering, and stale workbench discovery refreshes.
+
+Final verification:
+
+- `npm run test:ai`: 83 tests passed.
+- `npm run test:agent`: 19 tests passed.
+- `cd crawler && python3 -m unittest test_workbench.py`: 18 tests passed.
+- `npm run test:frontend`: 15 tests passed.
+- `npm run build`: Vite production build passed.
+- `git diff --check`: no whitespace errors.
+
+Migration note:
+
+- Supabase SQL editor: `https://supabase.com/dashboard/project/nlsgqlkqimedgftkmzxn/sql/new`
+- Apply the relevant updated `crawler/ai_schema.sql` sections for the new AI conversation tables, conversation link columns, crawler brief fields, and `external_discovery_jobs.status` check constraint including `partial`.
