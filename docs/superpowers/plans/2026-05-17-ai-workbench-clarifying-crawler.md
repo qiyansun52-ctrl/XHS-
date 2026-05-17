@@ -851,7 +851,8 @@ Add global instances after `research_service` is created:
 ```python
 conversation_store = ConversationStore(sb)
 clarification_service = ClarificationService(
-    structured_completion=research_service._create_structured_chat_completion
+    structured_completion=research_service._create_structured_chat_completion,
+    text_model=research_service.text_model,
 )
 ```
 

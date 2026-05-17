@@ -180,19 +180,18 @@ class ClarificationServiceTests(unittest.IsolatedAsyncioTestCase):
             calls.append(kwargs)
             return payload
 
-        service = ClarificationService(structured_completion=valid_completion)
+        service = ClarificationService(structured_completion=valid_completion, text_model="unit-test-model")
 
         result = await service.clarify_request("帮我找美国方面的素材")
 
         self.assertEqual(result, payload)
-        self.assertIsInstance(calls[0]["model"], str)
-        self.assertTrue(calls[0]["model"])
+        self.assertEqual(calls[0]["model"], "unit-test-model")
 
     async def test_invalid_llm_payload_falls_back_to_deterministic_brief(self):
         def invalid_completion(**kwargs):
             return {"broken": True}
 
-        service = ClarificationService(structured_completion=invalid_completion)
+        service = ClarificationService(structured_completion=invalid_completion, text_model="unit-test-model")
 
         result = await service.clarify_request("帮我找新加坡申请素材")
 

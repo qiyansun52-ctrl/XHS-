@@ -50,10 +50,10 @@ class ClarificationService:
     def __init__(
         self,
         structured_completion: Optional[Callable[..., Dict[str, Any]]] = None,
-        text_model: str = "gemini-3-pro-preview",
+        text_model: Optional[str] = None,
     ):
         self.structured_completion = structured_completion
-        self.text_model = text_model
+        self.text_model = (text_model or "").strip()
 
     async def clarify_request(self, question: str, messages: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         if self.structured_completion:
@@ -105,6 +105,8 @@ class ClarificationService:
         }
 
     def _call_clarification_llm(self, question: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if not self.text_model:
+            raise ValueError("text_model is required when structured_completion is configured")
         schema = self._clarification_schema()
         prompt = {
             "question": question,
