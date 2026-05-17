@@ -69,6 +69,44 @@ def derive_search_queries(
     return cleaned
 
 
+def derive_search_queries_from_brief(question: str, crawler_brief: dict, max_queries: int = 4) -> list[str]:
+    provided = [
+        str(query).strip()
+        for query in (crawler_brief or {}).get("search_queries") or []
+        if str(query).strip()
+    ]
+    if provided:
+        return provided[:max_queries]
+
+    country = (crawler_brief or {}).get("country") or "英国"
+    scenes = (crawler_brief or {}).get("content_scenes") or []
+    expressions = (crawler_brief or {}).get("expression_types") or []
+    scene = scenes[0] if scenes else "生活类"
+    expression = expressions[0] if expressions else "经验型"
+    scene_term = {
+        "生活类": "生活",
+        "申请类": "申请",
+        "作业论文考试类": "论文 考试",
+        "住宿租房": "租房",
+        "校园日常": "校园 日常",
+        "就业实习": "就业 实习",
+    }.get(scene, scene)
+    expression_term = {
+        "经验型": "真实经验",
+        "吐槽型": "吐槽",
+        "干货攻略": "攻略",
+        "避坑警示": "避坑",
+        "情绪共鸣": "日常",
+    }.get(expression, expression)
+    queries = [
+        f"{country}留学 {scene_term} {expression_term}",
+        f"{country}留学生 {scene_term} 小红书",
+        f"{country}留学 {scene_term} 避坑",
+        f"{country}留学生 {expression_term}",
+    ]
+    return queries[:max_queries]
+
+
 def _log_norm(value: Any) -> float:
     try:
         number = max(float(value or 0), 0.0)

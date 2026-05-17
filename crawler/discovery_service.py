@@ -29,6 +29,11 @@ class DiscoveryService:
         search_queries: Optional[List[str]] = None,
         benchmark_account_ids: Optional[List[str]] = None,
         created_by_member_id: Optional[str] = None,
+        crawler_brief: Optional[Dict[str, Any]] = None,
+        quality_targets: Optional[List[str]] = None,
+        exclusions: Optional[List[str]] = None,
+        candidate_scoring_hint: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         queries = (
             derive_search_queries(user_question, max_queries=self.max_queries)
@@ -44,6 +49,11 @@ class DiscoveryService:
             "benchmark_account_ids": benchmark_account_ids or [],
             "status": "pending",
             "created_by_member_id": created_by_member_id,
+            "crawler_brief": crawler_brief or {},
+            "quality_targets": quality_targets or [],
+            "exclusions": exclusions or [],
+            "candidate_scoring_hint": candidate_scoring_hint,
+            "conversation_id": conversation_id,
         }
         res = self.sb.table("external_discovery_jobs").insert([payload]).execute()
         rows = res.data or []

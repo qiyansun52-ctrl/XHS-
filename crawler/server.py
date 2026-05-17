@@ -571,6 +571,8 @@ async def process_external_discovery_jobs():
 
             candidates_seen = set()
             stored_count = 0
+            fetch_error_count = 0
+            fetch_errors = []
             try:
                 for query in (job.get("search_queries") or [])[:EXTERNAL_DISCOVERY_MAX_KEYWORD_RESULTS]:
                     notes = await search_keyword_notes(xhs_client, query, limit=EXTERNAL_DISCOVERY_MAX_KEYWORD_RESULTS)
@@ -588,7 +590,13 @@ async def process_external_discovery_jobs():
                         fetch_url = url
                         if xsec_token and "xsec_token" not in fetch_url:
                             fetch_url = f"{fetch_url}?xsec_token={xsec_token}"
-                        post_data = await fetch_post_data(fetch_url)
+                        try:
+                            post_data = await fetch_post_data(fetch_url)
+                        except Exception as fetch_error:
+                            fetch_error_count += 1
+                            fetch_errors.append(str(fetch_error)[:160])
+                            log.warning(f"  ⚠️ 外部发现候选详情抓取失败，跳过 note_id={note_id}: {fetch_error}")
+                            continue
                         post_data["url"] = url
                         await upsert_discovery_candidate(job_id, "keyword_search", {"search_query": query}, post_data)
                         stored_count += 1
@@ -640,12 +648,22 @@ async def process_external_discovery_jobs():
                     if stored_count >= EXTERNAL_DISCOVERY_MAX_CANDIDATES:
                         break
 
+                final_status = "completed"
+                error_message = None
+                if stored_count > 0 and fetch_error_count > 0:
+                    final_status = "partial"
+                    error_message = f"{fetch_error_count} 条候选详情抓取失败；已保留可用候选。"
+                elif stored_count == 0 and fetch_error_count > 0:
+                    final_status = "failed"
+                    error_message = "; ".join(fetch_errors[:3]) or "没有抓到可用候选。"
+
                 sb.table("external_discovery_jobs").update({
-                    "status": "completed",
+                    "status": final_status,
+                    "error_message": error_message,
                     "finished_at": now_iso(),
                     "updated_at": now_iso(),
                 }).eq("id", job_id).execute()
-                log.info(f"  ✅ 外部发现任务完成: {job_id} candidates={stored_count}")
+                log.info(f"  ✅ 外部发现任务结束: {job_id} status={final_status} candidates={stored_count}")
             except Exception as e:
                 sb.table("external_discovery_jobs").update({
                     "status": "failed",

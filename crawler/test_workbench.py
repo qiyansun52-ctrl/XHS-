@@ -207,6 +207,7 @@ class ClarificationServiceTests(unittest.IsolatedAsyncioTestCase):
 
 
 import ai_api
+from discovery import derive_search_queries_from_brief
 
 
 class WorkbenchApiTests(unittest.IsolatedAsyncioTestCase):
@@ -259,3 +260,69 @@ class WorkbenchApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["brief"]["crawler_brief"]["country"], "英国")
         self.assertEqual(snapshot["context"]["latest_crawler_brief"]["country"], "英国")
+
+
+class DiscoveryBriefTests(unittest.TestCase):
+    def test_derive_search_queries_from_brief_prefers_llm_queries(self):
+        brief = {
+            "country": "英国",
+            "content_scenes": ["生活类"],
+            "expression_types": ["经验型"],
+            "search_queries": ["英国留学 生活 真实经验", "英国留学生 日常 吐槽"],
+        }
+
+        queries = derive_search_queries_from_brief("帮我找英国方面的素材", brief, max_queries=4)
+
+        self.assertEqual(queries[:2], ["英国留学 生活 真实经验", "英国留学生 日常 吐槽"])
+
+    def test_derive_search_queries_from_brief_builds_fallback_queries(self):
+        brief = {
+            "country": "英国",
+            "content_scenes": ["作业论文考试类"],
+            "expression_types": ["避坑警示"],
+            "search_queries": [],
+        }
+
+        queries = derive_search_queries_from_brief("帮我找英国方面的素材", brief, max_queries=4)
+
+        self.assertIn("英国留学 论文 考试", queries[0])
+        self.assertLessEqual(len(queries), 4)
+
+
+class DiscoveryJobApiBriefTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.original_service = getattr(ai_api, "discovery_service", None)
+        self.created_payloads = []
+
+        class FakeDiscoveryService:
+            def __init__(inner_self, outer):
+                inner_self.outer = outer
+
+            def create_job(inner_self, **payload):
+                inner_self.outer.created_payloads.append(payload)
+                return {"id": "job-1", **payload, "status": "pending"}
+
+        ai_api.discovery_service = FakeDiscoveryService(self)
+
+    def tearDown(self):
+        ai_api.discovery_service = self.original_service
+
+    async def test_create_discovery_job_accepts_crawler_brief(self):
+        req = ai_api.CreateDiscoveryJobReq(
+            user_question="帮我找英国方面的素材",
+            task_type="material",
+            trigger_reason="user_requested",
+            internal_answer_payload={},
+            crawler_brief={
+                "country": "英国",
+                "search_queries": ["英国留学 生活 真实经验"],
+                "quality_targets": ["高收藏"],
+                "exclusions": ["机构广告"],
+            },
+            conversation_id="00000000-0000-0000-0000-000000000001",
+        )
+
+        result = await ai_api.create_discovery_job(req)
+
+        self.assertEqual(result["job"]["search_queries"], ["英国留学 生活 真实经验"])
+        self.assertEqual(self.created_payloads[0]["crawler_brief"]["country"], "英国")

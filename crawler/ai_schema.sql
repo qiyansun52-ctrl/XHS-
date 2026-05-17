@@ -476,6 +476,34 @@ alter table agent_review_actions
 alter table external_discovery_jobs
   add column if not exists conversation_id uuid references ai_conversations(id) on delete set null;
 
+alter table external_discovery_jobs
+  add column if not exists crawler_brief jsonb not null default '{}'::jsonb;
+
+alter table external_discovery_jobs
+  add column if not exists quality_targets text[] not null default '{}';
+
+alter table external_discovery_jobs
+  add column if not exists exclusions text[] not null default '{}';
+
+alter table external_discovery_jobs
+  add column if not exists candidate_scoring_hint text;
+
+do $$
+begin
+  if exists (
+    select 1
+    from pg_constraint
+    where conname = 'external_discovery_jobs_status_check'
+      and conrelid = 'external_discovery_jobs'::regclass
+  ) then
+    alter table external_discovery_jobs drop constraint external_discovery_jobs_status_check;
+  end if;
+end $$;
+
+alter table external_discovery_jobs
+  add constraint external_discovery_jobs_status_check
+  check (status in ('pending', 'running', 'completed', 'partial', 'failed', 'cancelled'));
+
 create table if not exists external_discovery_candidates (
   id uuid primary key default gen_random_uuid(),
   job_id uuid not null references external_discovery_jobs(id) on delete cascade,

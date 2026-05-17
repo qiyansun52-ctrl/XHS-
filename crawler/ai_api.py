@@ -36,6 +36,7 @@ import voyageai
 from agent import AgentEventBus, AgentOrchestrator, AgentRunStore, ContentResearchSkill, PlanEngine, ToolInvoker
 from agent.conversation_store import ConversationStore
 from clarification_service import ClarificationService
+from discovery import derive_search_queries, derive_search_queries_from_brief
 from discovery_service import DiscoveryNotFoundError, DiscoveryService
 from research_models import ResearchRequest
 from research_service import ResearchService
@@ -447,6 +448,8 @@ class CreateDiscoveryJobReq(BaseModel):
     search_queries: Optional[List[str]] = None
     benchmark_account_ids: List[str] = Field(default_factory=list)
     created_by_member_id: Optional[str] = None
+    crawler_brief: Dict[str, Any] = Field(default_factory=dict)
+    conversation_id: Optional[str] = None
 
 
 class ReviewCandidateReq(BaseModel):
@@ -738,14 +741,24 @@ async def create_discovery_job(req: CreateDiscoveryJobReq):
     if not enabled:
         raise HTTPException(400, "外部发现功能尚未开启")
     try:
+        queries = req.search_queries
+        if not queries and req.crawler_brief:
+            queries = derive_search_queries_from_brief(req.user_question, req.crawler_brief, max_queries=4)
+        if not queries:
+            queries = derive_search_queries(req.user_question, max_queries=4)
         job = discovery_service.create_job(
             user_question=req.user_question,
             task_type=req.task_type,
             trigger_reason=req.trigger_reason,
             internal_answer_payload=req.internal_answer_payload,
-            search_queries=req.search_queries,
+            search_queries=queries,
             benchmark_account_ids=req.benchmark_account_ids,
             created_by_member_id=req.created_by_member_id,
+            crawler_brief=req.crawler_brief,
+            quality_targets=req.crawler_brief.get("quality_targets") or [],
+            exclusions=req.crawler_brief.get("exclusions") or [],
+            candidate_scoring_hint=req.crawler_brief.get("candidate_scoring_hint"),
+            conversation_id=req.conversation_id,
         )
         return {"ok": True, "job": job}
     except Exception as e:
