@@ -187,6 +187,13 @@ class ClarificationServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, payload)
         self.assertEqual(calls[0]["model"], "unit-test-model")
 
+    async def test_structured_completion_requires_configured_model(self):
+        def valid_completion(**kwargs):
+            return {"needs_clarification": True, "option_groups": []}
+
+        with self.assertRaisesRegex(ValueError, "text_model is required"):
+            ClarificationService(structured_completion=valid_completion)
+
     async def test_invalid_llm_payload_falls_back_to_deterministic_brief(self):
         def invalid_completion(**kwargs):
             return {"broken": True}

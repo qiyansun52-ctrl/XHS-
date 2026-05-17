@@ -54,6 +54,8 @@ class ClarificationService:
     ):
         self.structured_completion = structured_completion
         self.text_model = (text_model or "").strip()
+        if self.structured_completion and not self.text_model:
+            raise ValueError("text_model is required when structured_completion is configured")
 
     async def clarify_request(self, question: str, messages: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         if self.structured_completion:
@@ -105,8 +107,6 @@ class ClarificationService:
         }
 
     def _call_clarification_llm(self, question: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-        if not self.text_model:
-            raise ValueError("text_model is required when structured_completion is configured")
         schema = self._clarification_schema()
         prompt = {
             "question": question,
