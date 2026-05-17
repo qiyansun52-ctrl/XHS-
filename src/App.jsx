@@ -5,8 +5,6 @@ import {
   ROLE_LABELS,
   Skeleton,
   ToastViewport,
-  createGlassCardStyle,
-  createPrimaryButtonStyle,
   designTokens,
   inputStyle,
   useIsMobile,
@@ -17,8 +15,7 @@ const AccountsPage = lazy(() => import("./components/AccountsPage.jsx"));
 const CalendarPage = lazy(() => import("./components/CalendarPage.jsx"));
 const MaterialPage = lazy(() => import("./components/MaterialPage.jsx"));
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage.jsx"));
-const AISearchPage = lazy(() => import("./components/AISearchPage.jsx"));
-const AgentPage = lazy(() => import("./components/AgentPage.jsx"));
+const AIWorkbenchPage = lazy(() => import("./components/AIWorkbenchPage.jsx"));
 
 const ACCOUNT_LIST_COLUMNS = [
   "id",
@@ -122,14 +119,12 @@ function JoinTeamModal({ onClose, onJoin }) {
 export default function App() {
   const isMobile = useIsMobile();
   const [view, setView]         = useState("accounts");
-  const [aiMode, setAiMode]     = useState("classic");
   const [hasOpenedAi, setHasOpenedAi] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [members, setMembers]   = useState([]);
   const [showJoin, setShowJoin] = useState(false);
   const [hoveredNav, setHoveredNav] = useState(null);
   const [hoveredAccountId, setHoveredAccountId] = useState(null);
-  const agentModeEnabled = String(import.meta.env.VITE_AGENT_RUNTIME_ENABLED || "true").toLowerCase() !== "false";
   const shouldRenderAi = hasOpenedAi || view === "ai";
 
   useEffect(() => {
@@ -311,41 +306,7 @@ export default function App() {
           {view === "material"  && <MaterialPage />}
           {shouldRenderAi && (
             <div style={{ display: view === "ai" ? "block" : "none" }}>
-              <div style={{ padding: isMobile ? "12px 12px 0" : "20px 20px 0" }}>
-                <div style={{
-                  display: "inline-flex",
-                  gap: 8,
-                  padding: 4,
-                  ...createGlassCardStyle({ padding: 4, radius: 12 }),
-                  borderRadius: 12,
-                }}>
-                  {[
-                    { key: "classic", label: "经典搜索" },
-                    ...(agentModeEnabled ? [{ key: "agent", label: "运营助手" }] : []),
-                  ].map(item => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => setAiMode(item.key)}
-                      style={{
-                        border: "none",
-                        background: aiMode === item.key ? "rgba(255,36,66,0.12)" : "transparent",
-                        color: aiMode === item.key ? "#FF2442" : "#666",
-                        borderRadius: 9,
-                        padding: "9px 12px",
-                        fontSize: 12,
-                        fontWeight: aiMode === item.key ? 700 : 500,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {aiMode === "classic" && <AISearchPage />}
-              {aiMode === "agent" && agentModeEnabled && <AgentPage />}
+              <AIWorkbenchPage />
             </div>
           )}
           {view === "analytics" && <AnalyticsPage  accounts={accounts} />}
