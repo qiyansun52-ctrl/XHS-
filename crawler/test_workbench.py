@@ -1,4 +1,7 @@
 import asyncio
+import ast
+from pathlib import Path
+from typing import List, Optional, Tuple
 import unittest
 
 from agent.conversation_store import ConversationStore
@@ -287,6 +290,59 @@ class DiscoveryBriefTests(unittest.TestCase):
 
         self.assertIn("英国留学 论文 考试", queries[0])
         self.assertLessEqual(len(queries), 4)
+
+    def test_derive_search_queries_from_brief_normalizes_malformed_values(self):
+        brief = {
+            "country": ["英国"],
+            "content_scenes": "住宿租房",
+            "expression_types": "干货攻略",
+            "search_queries": "英国留学 租房 攻略",
+        }
+
+        queries = derive_search_queries_from_brief("帮我找英国方面的素材", brief, max_queries=4)
+
+        self.assertEqual(queries, ["英国留学 租房 攻略"])
+
+    def test_derive_search_queries_from_brief_falls_back_for_invalid_country(self):
+        brief = {
+            "country": ["英国"],
+            "content_scenes": "住宿租房",
+            "expression_types": "干货攻略",
+            "search_queries": [],
+        }
+
+        queries = derive_search_queries_from_brief("帮我找英国方面的素材", brief, max_queries=4)
+
+        self.assertEqual(queries[0], "英国留学 租房 攻略")
+
+
+def load_server_helper(name):
+    server_path = Path(__file__).with_name("server.py")
+    module_ast = ast.parse(server_path.read_text(encoding="utf-8"))
+    function_ast = next(
+        node for node in module_ast.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+    module = ast.Module(body=[function_ast], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {"List": List, "Optional": Optional, "Tuple": Tuple}
+    exec(compile(module, str(server_path), "exec"), namespace)
+    return namespace[name]
+
+
+class DiscoveryFinalStatusTests(unittest.TestCase):
+    def test_resolve_external_discovery_final_status(self):
+        resolve_status = load_server_helper("resolve_external_discovery_final_status")
+
+        self.assertEqual(
+            resolve_status(0, 0, []),
+            ("failed", "没有抓到可用候选。"),
+        )
+        self.assertEqual(
+            resolve_status(3, 2, ["timeout"]),
+            ("partial", "2 条候选详情抓取失败；已保留可用候选。"),
+        )
+        self.assertEqual(resolve_status(3, 0, []), ("completed", None))
 
 
 class DiscoveryJobApiBriefTests(unittest.IsolatedAsyncioTestCase):

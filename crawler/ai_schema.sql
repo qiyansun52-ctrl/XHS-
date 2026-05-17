@@ -489,15 +489,21 @@ alter table external_discovery_jobs
   add column if not exists candidate_scoring_hint text;
 
 do $$
+declare
+  constraint_record record;
 begin
-  if exists (
-    select 1
+  for constraint_record in
+    select conname
     from pg_constraint
-    where conname = 'external_discovery_jobs_status_check'
-      and conrelid = 'external_discovery_jobs'::regclass
-  ) then
-    alter table external_discovery_jobs drop constraint external_discovery_jobs_status_check;
-  end if;
+    where conrelid = 'external_discovery_jobs'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%status%'
+  loop
+    execute format(
+      'alter table external_discovery_jobs drop constraint %I',
+      constraint_record.conname
+    );
+  end loop;
 end $$;
 
 alter table external_discovery_jobs

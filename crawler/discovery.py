@@ -70,17 +70,25 @@ def derive_search_queries(
 
 
 def derive_search_queries_from_brief(question: str, crawler_brief: dict, max_queries: int = 4) -> list[str]:
+    def normalize_string_list(value: Any) -> list[str]:
+        if isinstance(value, str):
+            value = [value]
+        elif not isinstance(value, Iterable) or isinstance(value, (Mapping, bytes)):
+            value = []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    brief = crawler_brief or {}
     provided = [
-        str(query).strip()
-        for query in (crawler_brief or {}).get("search_queries") or []
-        if str(query).strip()
+        normalize_question(query)
+        for query in normalize_string_list(brief.get("search_queries"))
     ]
     if provided:
         return provided[:max_queries]
 
-    country = (crawler_brief or {}).get("country") or "英国"
-    scenes = (crawler_brief or {}).get("content_scenes") or []
-    expressions = (crawler_brief or {}).get("expression_types") or []
+    raw_country = brief.get("country")
+    country = raw_country.strip() if isinstance(raw_country, str) and raw_country.strip() else "英国"
+    scenes = normalize_string_list(brief.get("content_scenes"))
+    expressions = normalize_string_list(brief.get("expression_types"))
     scene = scenes[0] if scenes else "生活类"
     expression = expressions[0] if expressions else "经验型"
     scene_term = {

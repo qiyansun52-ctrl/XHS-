@@ -22,7 +22,7 @@ import re
 import uuid
 import httpx
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 # ── 路径配置 ─────────────────────────────────────────────────────────
 DEFAULT_MEDIACRAWLER_DIR = os.path.join(os.path.expanduser("~"), "MediaCrawler")
@@ -542,6 +542,18 @@ def recover_stale_external_discovery_jobs():
     }).eq("status", "running").lt("started_at", cutoff_iso).execute()
 
 
+def resolve_external_discovery_final_status(
+    stored_count: int,
+    fetch_error_count: int,
+    fetch_errors: List[str],
+) -> Tuple[str, Optional[str]]:
+    if stored_count == 0:
+        return "failed", "; ".join(fetch_errors[:3]) or "没有抓到可用候选。"
+    if fetch_error_count > 0:
+        return "partial", f"{fetch_error_count} 条候选详情抓取失败；已保留可用候选。"
+    return "completed", None
+
+
 async def process_external_discovery_jobs():
     if not EXTERNAL_DISCOVERY_ENABLED:
         return
@@ -648,14 +660,11 @@ async def process_external_discovery_jobs():
                     if stored_count >= EXTERNAL_DISCOVERY_MAX_CANDIDATES:
                         break
 
-                final_status = "completed"
-                error_message = None
-                if stored_count > 0 and fetch_error_count > 0:
-                    final_status = "partial"
-                    error_message = f"{fetch_error_count} 条候选详情抓取失败；已保留可用候选。"
-                elif stored_count == 0 and fetch_error_count > 0:
-                    final_status = "failed"
-                    error_message = "; ".join(fetch_errors[:3]) or "没有抓到可用候选。"
+                final_status, error_message = resolve_external_discovery_final_status(
+                    stored_count,
+                    fetch_error_count,
+                    fetch_errors,
+                )
 
                 sb.table("external_discovery_jobs").update({
                     "status": final_status,
