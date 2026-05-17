@@ -86,7 +86,7 @@ def derive_search_queries_from_brief(question: str, crawler_brief: dict, max_que
         return provided[:max_queries]
 
     raw_country = brief.get("country")
-    country = raw_country.strip() if isinstance(raw_country, str) and raw_country.strip() else "英国"
+    country = raw_country.strip() if isinstance(raw_country, str) and raw_country.strip() in COUNTRY_HINTS else "英国"
     scenes = normalize_string_list(brief.get("content_scenes"))
     expressions = normalize_string_list(brief.get("expression_types"))
     scene = scenes[0] if scenes else "生活类"

@@ -305,7 +305,7 @@ class DiscoveryBriefTests(unittest.TestCase):
 
     def test_derive_search_queries_from_brief_falls_back_for_invalid_country(self):
         brief = {
-            "country": ["英国"],
+            "country": "火星",
             "content_scenes": "住宿租房",
             "expression_types": "干货攻略",
             "search_queries": [],
