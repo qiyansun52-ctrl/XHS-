@@ -2003,6 +2003,7 @@ Final verification:
 - `npm run test:frontend`: 15 tests passed.
 - `npm run build`: Vite production build passed.
 - `git diff --check`: no whitespace errors.
+- Playwright smoke verification on `http://127.0.0.1:5173/`: AI Workbench rendered, the prompt `帮我找英国方面的素材` created a conversation, and the LLM clarification card returned selectable option groups.
 
 Migration note:
 
