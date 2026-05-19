@@ -363,13 +363,14 @@ What shipped:
 - Conversation-scoped API endpoints for creating/listing conversations, clarifying a request, and generating crawler briefs.
 - Brief-aware discovery job creation, crawler brief fields on jobs, and `partial` discovery status for usable-but-incomplete crawls.
 - Unified AI Workbench UI with conversation history, chat, clarification chips, crawler brief confirmation, discovery status, and candidate approval.
+- Classic AI search and operations assistant remain reachable from the AI section while the workbench migration continues.
 - Shared discovery candidate review card reused by the legacy AI search page and the new workbench.
 
 Verification run:
 
 - `npm run test:ai`: 83 tests passed.
 - `npm run test:agent`: 19 tests passed.
-- `cd crawler && python3 -m unittest test_workbench.py`: 18 tests passed.
+- `cd crawler && python3 -m unittest test_workbench.py`: 22 tests passed.
 - `npm run test:frontend`: 15 tests passed.
 - `npm run build`: Vite production build passed.
 - `git diff --check`: passed with no whitespace errors.

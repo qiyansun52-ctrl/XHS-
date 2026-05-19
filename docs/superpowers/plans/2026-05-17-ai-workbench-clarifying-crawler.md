@@ -1999,7 +1999,7 @@ Final verification:
 
 - `npm run test:ai`: 83 tests passed.
 - `npm run test:agent`: 19 tests passed.
-- `cd crawler && python3 -m unittest test_workbench.py`: 18 tests passed.
+- `cd crawler && python3 -m unittest test_workbench.py`: 22 tests passed.
 - `npm run test:frontend`: 15 tests passed.
 - `npm run build`: Vite production build passed.
 - `git diff --check`: no whitespace errors.
